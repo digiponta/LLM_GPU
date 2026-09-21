@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Large local training data
+data/*.txt
+data/*.bz2
+data/*.xml
+
+# Model checkpoints
+model/*.pt
+model/*.pth
