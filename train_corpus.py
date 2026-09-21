@@ -1,6 +1,6 @@
 # train_corpus.py
 #
-# Train the v0.3-style homemade LLM on a physical CUDA GPU.
+# Train the v0.4 homemade LLM on a physical CUDA GPU.
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from train import Trainer
 
 
 TOKENIZER_FILE = "model/tokenizer.json"
-MODEL_FILE = "model/model-gpu-v0.3.pt"
+MODEL_FILE = "model/model-gpu-v0.4.pt"
 
 CONTEXT_LENGTH = 64
 D_MODEL = 64
@@ -26,7 +26,7 @@ HIDDEN_DIM = 256
 BATCH_SIZE = 64
 EPOCHS = 3
 LEARNING_RATE = 5e-4
-MAX_SAMPLES = 20_000
+MAX_SAMPLES = 120_000_000
 SEED = 42
 
 # GPU project: fail early by default if CUDA is unavailable.
@@ -63,7 +63,7 @@ def main():
 
     print()
     print("====================================")
-    print(" Homemade LLM GPU Training v0.3")
+    print(" Homemade LLM GPU Training v0.4")
     print("====================================")
     print()
 
@@ -137,6 +137,7 @@ def main():
         token_ids=token_ids,
         context_length=CONTEXT_LENGTH,
         max_samples=MAX_SAMPLES,
+        seed=SEED,
     )
 
     print()
@@ -144,6 +145,11 @@ def main():
     print("----------------------")
     print("Context length  :", CONTEXT_LENGTH)
     print("Training samples:", f"{len(dataset):,}")
+    print("Unique windows  :", f"{dataset.total_positions:,}")
+    if len(dataset) > dataset.total_positions:
+        repeats = len(dataset) / dataset.total_positions
+        print("Corpus passes   :", f"{repeats:.2f} per epoch (approx.)")
+    print("Target runtime  :", "about 10 hours (estimated from v0.3 benchmark)")
     print("Batch size      :", BATCH_SIZE)
     print("Epochs          :", EPOCHS)
     print("Learning rate   :", LEARNING_RATE)
@@ -151,7 +157,10 @@ def main():
     loader = DataLoader(
         dataset,
         batch_size=BATCH_SIZE,
-        shuffle=True,
+        # v0.4 dataset already traverses corpus windows in a deterministic
+        # pseudo-random permutation. Avoid RandomSampler here because a
+        # 120M-sample randperm would require enormous host memory.
+        shuffle=False,
         num_workers=0,  # Windows-safe default.
         pin_memory=(device.type == "cuda"),
         drop_last=False,
