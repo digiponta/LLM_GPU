@@ -12,7 +12,7 @@ from tokenizer import Tokenizer
 
 
 TOKENIZER_FILE = "model/tokenizer.json"
-MODEL_FILE = "model/model-gpu-v0.3.pt"
+MODEL_FILE = "model/model-gpu-v0.4.pt"
 
 MAX_NEW_TOKENS = 100
 TEMPERATURE = 0.8
@@ -23,7 +23,7 @@ REPETITION_PENALTY = 1.15
 def main():
     print()
     print("====================================")
-    print(" Homemade LLM GPU Inference v0.3")
+    print(" Homemade LLM GPU Inference v0.4")
     print("====================================")
     print()
 
