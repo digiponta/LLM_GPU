@@ -93,7 +93,7 @@ looks for the existing original-project files:
 python train_corpus.py
 ```
 
-Default first GPU run:
+Default v0.4 long GPU run:
 
 ```text
 context length : 64
@@ -102,18 +102,24 @@ layers         : 2
 FFN dimension  : 256
 attention heads: 1
 batch size     : 64
-samples        : 20,000
+samples        : 120,000,000
 epochs         : 3
 learning rate  : 5e-4
 ```
 
-The sample count is intentionally much larger than the CPU/virtual-GPU v0.3
-smoke test because the physical GPU processes mini-batches in parallel.
+This sample count is estimated from the measured v0.3 benchmark on an
+RTX 3070 Ti: 20,000 samples x 3 epochs took about 6 seconds. Linear scaling
+gives approximately 120,000,000 samples x 3 epochs for a ten-hour run.
+
+Actual runtime will vary with GPU clocks, thermals, system load, and I/O.
+v0.4 computes sample positions on demand instead of allocating a huge Python
+list, and DataLoader shuffling is disabled because the dataset itself uses a
+deterministic pseudo-random corpus traversal.
 
 Checkpoint:
 
 ```text
-model/model-gpu-v0.3.pt
+model/model-gpu-v0.4.pt
 ```
 
 ## Inference
