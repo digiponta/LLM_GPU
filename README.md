@@ -142,3 +142,86 @@ corpus -> tokenizer -> model forward -> loss -> backward
 
 LLM_GPU preserves that path while moving tensor computation and gradient
 calculation to a physical CUDA GPU.
+
+
+---
+
+## Note: Practical Training Data Scale for LLM_GPU
+
+The following figure summarizes how much training data is needed to make the current **LLM_GPU** configuration practical.
+
+![How Much Training Data Is Needed to Make LLM_GPU Practical?](docs/llm_gpu_training_data_scale.svg)
+
+### Current model
+
+The current LLM_GPU configuration is approximately:
+
+- Vocabulary: **~5,000**
+- `d_model`: **64**
+- Transformer layers: **2**
+- Parameters: **~0.75M**
+
+### Training scale guideline
+
+| Stage | Training tokens (approx.) | Expected status |
+|---|---:|---|
+| Initial test | 100K–500K | Starts to generate sentence-like text |
+| Small-scale experiment | 1M–3M | Learning behavior and loss trends become visible |
+| Prototype for a specific domain | 3M–10M | May become useful for limited-domain tasks |
+| Practical limit evaluation of the current model | 10M–30M | The capacity limit of the current architecture becomes visible |
+| General-purpose conversational LLM | 100M–several billion | Requires a substantially larger model |
+
+A useful rule of thumb is to train on roughly **10–30 times the number of model parameters**. For the current model:
+
+```text
+0.75M parameters × 20 ≈ 15M tokens
+```
+
+Therefore, **10M–20M tokens** is a good experimental target for the current LLM_GPU implementation.
+
+If validation loss, perplexity, and generated-text quality stop improving significantly in the **10M–30M token** range, the bottleneck is likely to be **model capacity rather than data volume**.
+
+### Suggested scale-up
+
+A reasonable next model for comparison is:
+
+- Vocabulary: **8,000–16,000**
+- `d_model`: **128**
+- Layers: **4–6**
+- Heads: **4–8**
+- Parameters: **a few million to ~10M**
+- Training data: **30M–200M tokens**
+
+This comparison is useful for determining whether the next limitation comes from **insufficient training data** or **insufficient model capacity**.
+
+### Relevance to LLM_SEM and QHA
+
+LLM_GPU does not necessarily need to become a large general-purpose conversational model. In the broader architecture, a more useful role is:
+
+```text
+Input Text
+   ↓
+LLM_GPU
+   ↓
+Semantic Vector
+   ↓
+LLM_SEM
+   ↓
+VM Routing (QHA)
+```
+
+For this use case, the main evaluation targets are:
+
+- semantic representation quality,
+- embedding stability,
+- task-classification accuracy,
+- routing quality for VM selection.
+
+For QHA-oriented experiments, **10M–20M tokens of pretraining plus task-specific semantic data** can therefore be a meaningful practical target.
+
+### Recommended next experiment
+
+1. Train the current LLM_GPU model to about **10M tokens**.
+2. Evaluate training loss, validation loss, perplexity, generated-text quality, and semantic representation quality.
+3. Compare it with a larger model such as **`d_model=128` and 4 layers**.
+4. Use the comparison to separate **data-scale limits** from **model-scale limits**.
