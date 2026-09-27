@@ -178,7 +178,7 @@ def fluency_check(text: str) -> Tuple[bool, List[str]]:
     if re.search(r"_[A-Za-z]", stripped):
         issues.append("underscore-fragment")
 
-    if re.search(r"(.{2,10})\\1", stripped):
+    if re.search(r"(.{2,10})\1", stripped):
         issues.append("repeated-fragment")
 
     chunks = re.findall(r"[一-龯ぁ-んァ-ヶA-Za-z0-9]+", stripped)
