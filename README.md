@@ -5098,3 +5098,86 @@ semantic >= 26/30
 strict >= 26/30
 ```
 
+### v0.9.1 Semantic-Aware LM Head Adaptation v0.10
+
+v0.9 Semantic Consistency showed that generation hidden states can recover the
+correct semantic concept while the frozen LM head still emits a wrong token
+sequence. v0.10 tests whether this is a hidden-to-vocabulary mismatch.
+
+Controlled change from v0.9:
+
+```text
+LM Head:
+  frozen
+    ->
+  trainable at 1e-6
+```
+
+All other main conditions remain the same:
+
+```text
+semantic teacher      : v0.8 constrained, frozen
+Blocks 1-3            : frozen
+Blocks 4-6            : trainable @ 1e-5
+FinalNorm             : trainable @ 1e-5
+281 -> 256 projection : trainable @ 1e-3
+consistency head      : trainable @ 1e-3
+LM Head               : trainable @ 1e-6
+consistency weight    : 0.35
+```
+
+Loss:
+
+```text
+L_total
+=
+L_LM
++
+0.35 * L_semantic_consistency
+```
+
+The model starts again from the same v0.8 base checkpoint rather than from the
+already trained v0.9 consistency checkpoint, so the effect of LM-head unfreezing
+can be compared cleanly.
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_semantic_aware_lm_head_v010.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v0.9.1-semantic-aware-lm-head-v010.pt
+```
+
+Logs:
+
+```text
+results/semantic_aware_lm_head_v010/train.log
+results/semantic_aware_lm_head_v010/eval.log
+```
+
+Primary question:
+
+```text
+Does a very-low-LR LM-head adaptation convert
+correct generation-hidden semantics into correct tokens?
+```
+
+Primary targets:
+
+```text
+G05 generated answer -> CPU
+G05 hidden semantic -> CPU
+G08 -> Transformer
+G09 -> CUDA
+G28 -> CPU
+semantic > 26/30 if possible
+strict > 26/30 if possible
+```
+
