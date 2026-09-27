@@ -419,3 +419,30 @@ AI: CPUは汎用処理、GPUは大量の並列計算を得意とします。
 
 人: LLMとTransformerの違いは何ですか。
 AI: LLMは言語モデルの種類で、Transformerはその実装によく使われるニューラルネットワーク構造です。
+
+# v0.7 final GPU/CPU symmetry refinement.
+# These are training paraphrases; generalization evaluation uses different wording.
+
+人: GPUは主に何を担当しますか。
+AI: GPUは多数の計算を同時並行で処理することを主に担当します。
+
+人: GPUを使う利点は何ですか。
+AI: GPUは同じ種類の計算を大量に並列処理できる点が強みです。
+
+人: GPUは逐次処理と並列処理のどちらが得意ですか。
+AI: GPUは大量の並列処理を得意とします。
+
+人: グラフィックス以外でGPUは何に使えますか。
+AI: GPUは機械学習など大量の並列計算にも利用できます。
+
+人: CPUは主に何を担当しますか。
+AI: CPUは幅広い命令を実行し、コンピュータ全体の汎用処理を担当します。
+
+人: CPUを使う利点は何ですか。
+AI: CPUは多様な処理や順序依存の強い処理を柔軟に実行できます。
+
+人: CPUは逐次処理と並列処理のどちらに向いていますか。
+AI: CPUは複雑な逐次処理や汎用的な制御処理に向いています。
+
+人: CPUとGPUはどう使い分けますか。
+AI: CPUは汎用処理、GPUは大量の並列計算に使い分けます。
