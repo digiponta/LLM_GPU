@@ -2911,3 +2911,74 @@ representation drift remains small
 Only after these conditions are met should the adapter be integrated into the
 generation-conditioning path.
 
+### v0.9 Semantic Encoder Adapter v0.2: Margin-Aware Contrastive Binding
+
+Semantic Encoder Adapter v0.1 successfully learned the supervision heads, but
+G05 remained geometrically closer to the GPU centroid even though the concept
+head classified it as CPU. v0.2 therefore continues from the v0.1 adapter and
+adds an explicit centroid-margin objective.
+
+New objective:
+
+```text
+sim(sample, positive centroid)
+  >=
+max sim(sample, negative centroid) + 0.05
+```
+
+Total loss:
+
+```text
+1.00 * Concept CE
+0.75 * Attribute BCE
+0.50 * Centroid Margin Loss
+0.25 * Preservation Loss
+```
+
+The base v0.8 encoder remains frozen. The adapter architecture is unchanged:
+
+```text
+256 -> 64 -> 256 residual
+residual scale = 0.25
+```
+
+v0.2 initializes from:
+
+```text
+model/model-gpu-v0.9-semantic-adapter-v01.pt
+```
+
+and writes:
+
+```text
+model/model-gpu-v0.9-semantic-adapter-v02.pt
+```
+
+Run:
+
+```powershell
+git checkout v0.9
+git pull
+
+python run_semantic_encoder_adapter_v02.py
+```
+
+Logs:
+
+```text
+results/semantic_encoder_adapter_v02/train.log
+results/semantic_encoder_adapter_v02/eval.log
+```
+
+The evaluation now checks not only G05/G08 but also centroid accuracy across all
+held-out technical prompts. The integration gate is:
+
+```text
+G05 adapted centroid -> CPU
+G08 adapted centroid -> Transformer
+held-out technical centroid accuracy does not regress
+```
+
+Only if that gate is met should the semantic adapter be connected to the
+generation-conditioning path.
+
