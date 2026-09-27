@@ -2794,3 +2794,120 @@ python semantic_probe_v09.py --all-tech-cases
 
 No model parameters are updated and no new checkpoint is produced.
 
+### v0.9 Semantic Encoder Adapter v0.1: Concept Binding + Attribute Supervision
+
+The Semantic Probe showed that the two hardest cases fail for different
+reasons:
+
+```text
+G05 CPU
+  nearest centroid : GPU
+  CPU property axis: positive
+  -> CPU properties exist, but concept binding is wrong
+
+G08 Transformer
+  nearest centroid : Transformer
+  structure axis   : positive but weak
+  -> concept identity exists, but structure/category signal is weak
+```
+
+v0.1 therefore adapts the frozen semantic encoder representation directly
+without updating the base v0.8 model.
+
+Architecture:
+
+```text
+Frozen v0.8 prompt hidden (256)
+        |
+        v
+Residual Semantic Adapter
+256 -> 64 -> 256
+        |
+        +---- concept head   : 256 -> 6
+        |
+        +---- attribute head : 256 -> 4
+```
+
+The adapter begins close to the identity mapping. The final up-projection is
+zero-initialized and the residual contribution is scaled by 0.25.
+
+Concept classes:
+
+```text
+GPU
+CPU
+LLM
+Transformer
+CUDA
+Python
+```
+
+Attribute targets:
+
+```text
+parallel
+general/control
+language
+attention/structure
+```
+
+Training objective:
+
+```text
+total loss
+  = 1.00 * concept cross-entropy
+  + 0.75 * attribute BCE
+  + 0.25 * representation-preservation cosine loss
+```
+
+Training uses the existing technical reference prompts from the augmentation
+bank, minimal pairs, reverse-definition rows, and Boundary v1 technical rows.
+The fixed 30 development prompts are checked for exact overlap and training
+stops if any overlap is found.
+
+Run:
+
+```powershell
+git checkout v0.9
+git pull
+
+python run_semantic_encoder_adapter_v01.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v0.9-semantic-adapter-v01.pt
+```
+
+Logs:
+
+```text
+results/semantic_encoder_adapter_v01/train.log
+results/semantic_encoder_adapter_v01/eval.log
+```
+
+This first experiment does not update generation parameters. It evaluates
+semantic geometry first and reports, for G05 and G08:
+
+```text
+raw nearest centroid
+adapted nearest centroid
+raw/adapted margin
+adapter representation drift
+supervised concept probabilities
+supervised attribute probabilities
+```
+
+Primary success conditions:
+
+```text
+G05 adapted centroid -> CPU
+G08 adapted centroid -> Transformer
+G08 attention/structure probability is strong
+representation drift remains small
+```
+
+Only after these conditions are met should the adapter be integrated into the
+generation-conditioning path.
+
