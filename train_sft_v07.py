@@ -116,13 +116,13 @@ def deduplicate_pairs(
 
 
 def stratified_split(
-    rows: Sequence[Tuple[str, str, str]],
+    rows: Sequence[Tuple[str, str, Tuple[str, ...]]],
     validation_ratio: float,
     seed: int,
 ):
-    groups: Dict[str, List[Tuple[str, str, str]]] = {}
+    groups: Dict[str, List[Tuple[str, str, Tuple[str, ...]]]] = {}
     for row in rows:
-        groups.setdefault(row[2], []).append(row)
+        groups.setdefault(classify_intent(row[0]), []).append(row)
 
     rng = random.Random(seed)
     train_rows = []
@@ -153,14 +153,14 @@ def stratified_split(
 class MultiTaskDataset(Dataset):
     def __init__(
         self,
-        rows: Sequence[Tuple[str, str, str]],
+        rows: Sequence[Tuple[str, str, Tuple[str, ...]]],
         tokenizer: Tokenizer,
         context_length: int,
         label_to_id: Dict[str, int],
     ):
         self.rows = []
 
-        for user_text, answer_text, intent in rows:
+        for user_text, answer_text, tags in rows:
             prompt = f"{USER_PREFIX}{user_text}\n{AI_PREFIX}"
             prompt_ids = tokenizer.encode(prompt, add_bos=True)
             answer_ids = tokenizer.encode(answer_text, add_eos=True)
@@ -201,7 +201,13 @@ class MultiTaskDataset(Dataset):
                 torch.tensor(y, dtype=torch.long),
                 torch.tensor(lm_mask, dtype=torch.float32),
                 torch.tensor(prompt_index, dtype=torch.long),
-                torch.tensor(label_to_id[intent], dtype=torch.long),
+                torch.tensor(
+                    [
+                        1.0 if label in tags else 0.0
+                        for label in label_to_id
+                    ],
+                    dtype=torch.float32,
+                ),
             ))
 
     def __len__(self):
@@ -236,10 +242,12 @@ def forward_losses(
     batch_index = torch.arange(hidden.size(0), device=hidden.device)
     prompt_repr = hidden[batch_index, prompt_index]
     intent_logits = intent_head(prompt_repr)
-    intent_loss = F.cross_entropy(intent_logits, intent_targets)
-    intent_acc = (
-        intent_logits.argmax(dim=-1) == intent_targets
-    ).float().mean()
+    intent_loss = F.binary_cross_entropy_with_logits(
+        intent_logits,
+        intent_targets,
+    )
+    intent_pred = (torch.sigmoid(intent_logits) >= 0.5).float()
+    intent_acc = (intent_pred == intent_targets).float().mean()
 
     total_loss = lm_loss + intent_loss_weight * intent_loss
     return total_loss, lm_loss, intent_loss, intent_acc
@@ -323,7 +331,11 @@ def main() -> None:
         base_pairs,
         variants_per_intent=args.variants_per_intent,
     )
-    labels = sorted({row[2] for row in augmented_rows})
+    labels = sorted({
+        label
+        for _, _, tags in augmented_rows
+        for label in tags
+    })
     label_to_id = {label: i for i, label in enumerate(labels)}
 
     train_rows, val_rows = stratified_split(
@@ -372,11 +384,11 @@ def main() -> None:
     print("Base loss          :", checkpoint.get("loss"))
     print("Base unique pairs  :", len(base_pairs))
     print("Augmented pairs    :", len(augmented_rows))
-    print("Intent classes     :", len(labels))
-    print("Intent labels      :", ", ".join(labels))
+    print("Intent tags        :", len(labels))
+    print("Intent tag names   :", ", ".join(labels))
     print("Train rows         :", len(train_rows))
     print("Validation rows    :", len(val_rows))
-    print("Intent loss weight :", args.intent_loss_weight)
+    print("Multi-label weight :", args.intent_loss_weight)
     print("Label smoothing    :", args.label_smoothing)
     print("Learning rate      :", args.learning_rate)
     print()
@@ -444,7 +456,7 @@ def main() -> None:
         print(
             f"Epoch {epoch:02d}/{args.epochs} "
             f"| train={train_loss:.4f} lm={train_lm:.4f} "
-            f"intent={train_intent:.4f} intent_acc={train_acc:.1%} "
+            f"intent={train_intent:.4f} tag_acc={train_acc:.1%} "
             f"| val={val_loss:.4f} lm={val_lm:.4f} "
             f"intent={val_intent:.4f} intent_acc={val_acc:.1%} "
             f"| {elapsed:.2f}s"
@@ -486,6 +498,8 @@ def main() -> None:
     torch.save(
         {
             "labels": labels,
+            "multi_label": True,
+            "threshold": 0.5,
             "state_dict": intent_head.state_dict(),
             "d_model": model.d_model,
             "epoch": best_epoch,
