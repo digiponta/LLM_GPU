@@ -4465,3 +4465,120 @@ v0.9 cross-attention
   strict   : 25/30
 ```
 
+### v0.9.1 Semantic Encoder Adapter v0.7: Instruction-Computation Hierarchy
+
+v0.6.x treated CPU-side heterogeneous instructions and GPU-side homogeneous
+computation as opposing semantic axes. The next refinement makes the underlying
+relationship explicit:
+
+```text
+computation is part of instruction execution
+```
+
+rather than treating `computation` and `instruction` as synonyms.
+
+Hierarchy:
+
+```text
+processor
+└─ instruction_execution
+   ├─ computation
+   │  ├─ arithmetic_logic
+   │  └─ repeated_computation
+   ├─ control_flow
+   ├─ memory_operation
+   ├─ data_movement
+   └─ heterogeneous_instruction_stream
+
+CPU-related characteristics:
+  general_purpose
+  control_oriented
+  heterogeneous_instruction_stream
+
+GPU-related characteristics:
+  throughput_oriented
+  data_parallel
+  repeated_computation
+```
+
+The semantic intent is:
+
+```text
+CPU
+  = executes mixed instruction streams containing
+    computation + control + memory + data movement
+
+GPU
+  = also executes instructions, but is optimized for
+    repeated / parallel computation over many data items
+```
+
+The experiment explicitly teaches examples such as:
+
+```text
+ADD is computation and an instruction.
+Branch/jump is instruction execution but not arithmetic computation.
+LOAD/STORE are instruction execution for memory operations.
+Programs combine computation, control, memory and data-movement instructions.
+GPU parallel computation is still instruction execution.
+```
+
+Relation constraints enforce child <= parent:
+
+```text
+computation <= instruction_execution
+arithmetic_logic <= computation
+repeated_computation <= computation
+control_flow <= instruction_execution
+memory_operation <= instruction_execution
+data_movement <= instruction_execution
+heterogeneous_instruction_stream <= instruction_execution
+```
+
+To preserve the semantic geometry already obtained in v0.6.2:
+
+```text
+base encoder        : frozen
+semantic adapter    : frozen
+concept/attr heads  : frozen
+new hierarchy head  : trainable
+generation          : unchanged
+```
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_semantic_encoder_adapter_v07.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v0.9.1-semantic-adapter-v07.pt
+```
+
+Logs:
+
+```text
+results/semantic_encoder_adapter_v07/train.log
+results/semantic_encoder_adapter_v07/eval.log
+```
+
+Primary gate:
+
+```text
+computation <= instruction_execution
+arithmetic_logic <= computation
+control/memory/data movement <= instruction_execution
+G05 remains CPU and heterogeneous-instruction-stream
+GPU repeated computation remains instruction execution
+G08 Transformer remains correct
+technical held-out centroid accuracy does not regress
+```
+
+Generation is not retrained in this step. The semantic ontology is validated
+first.
+
