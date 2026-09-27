@@ -2982,3 +2982,105 @@ held-out technical centroid accuracy does not regress
 Only if that gate is met should the semantic adapter be connected to the
 generation-conditioning path.
 
+### v0.9 Semantic Encoder Adapter v0.3: Hard Negative Pair + Acronym/Full-name Binding
+
+v0.2 preserved the technical held-out centroid accuracy at 8/10 and improved
+G08, but G05 still remained closer to GPU than CPU. The concept head already
+classified G05 as CPU with high confidence, so v0.3 targets the remaining
+geometry mismatch directly.
+
+v0.3 adds two mechanisms.
+
+First, explicit hard-negative pairwise ranking:
+
+```text
+CPU          > GPU
+GPU          > CPU
+CUDA         > Python
+Python       > CUDA
+Transformer  > Python / CUDA
+```
+
+The pairwise objective is:
+
+```text
+sim(sample, positive concept)
+  >=
+sim(sample, specified hard negative) + 0.08
+```
+
+Second, CPU/GPU acronym and full-name binding:
+
+```text
+CPU
+  <-> Central Processing Unit
+  <-> central processing
+  <-> general instruction execution / control
+
+GPU
+  <-> Graphics Processing Unit
+  <-> graphics processing
+  <-> high-throughput parallel computation
+```
+
+The GPU rows explicitly avoid teaching that GPU is graphics-only; the full name
+is linked to both its historical naming and its broader modern parallel-compute
+role.
+
+Training continues from:
+
+```text
+model/model-gpu-v0.9-semantic-adapter-v02.pt
+```
+
+and writes:
+
+```text
+model/model-gpu-v0.9-semantic-adapter-v03.pt
+```
+
+Loss weights:
+
+```text
+Concept CE            : 1.00
+Attribute BCE         : 0.75
+Centroid Margin Loss  : 0.25
+Pairwise Hard Negative: 0.75
+Preservation Loss     : 0.25
+
+centroid margin       : 0.05
+pairwise margin       : 0.08
+learning rate         : 2e-4
+```
+
+Run:
+
+```powershell
+git checkout v0.9
+git pull
+
+python run_semantic_encoder_adapter_v03.py
+```
+
+Logs:
+
+```text
+results/semantic_encoder_adapter_v03/train.log
+results/semantic_encoder_adapter_v03/eval.log
+```
+
+The v0.3 evaluation includes unseen acronym/full-name probes rather than
+replaying the binding training prompts verbatim.
+
+Integration gate:
+
+```text
+G05 adapted centroid -> CPU
+G08 adapted centroid -> Transformer
+G09 CUDA improves or does not regress
+technical held-out centroid accuracy does not regress
+CPU/GPU unseen full-name probes pass
+```
+
+Generation remains untouched until this semantic-geometry gate is met.
+
