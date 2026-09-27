@@ -332,6 +332,80 @@ AUGMENT_BANK: Dict[str, Dict[str, Sequence[str]]] = {
 
 
 
+
+
+# v0.8 technical concept binding refinement.
+# Shared prompt structures form minimal pairs: only the concept changes while
+# the requested semantic role stays constant. Canonical answers always name
+# the concept explicitly to strengthen entity <-> property binding.
+TECHNICAL_CONCEPTS = {
+    "GPU": {
+        "label": "tech_gpu",
+        "definition": "GPUは大量の計算を並列に処理するのが得意な演算装置です。",
+        "role": "GPUの中心的な役割は大量の並列計算を効率よく処理することです。",
+        "category": "GPUは並列計算を得意とする演算装置です。",
+        "contrast": "GPUはCPUのような汎用制御ではなく、大量の並列計算を得意とします。",
+    },
+    "CPU": {
+        "label": "tech_cpu",
+        "definition": "CPUは幅広い命令を実行し、汎用処理や制御を担当する演算装置です。",
+        "role": "CPUの中心的な役割は多様な命令を実行し、汎用処理を制御することです。",
+        "category": "CPUは汎用処理と制御を担当する演算装置です。",
+        "contrast": "CPUはGPUのような大量並列計算より、汎用処理や複雑な命令実行を得意とします。",
+    },
+    "LLM": {
+        "label": "tech_llm",
+        "definition": "LLMは大量の文章から言語パターンを学び、文章を扱う言語モデルです。",
+        "role": "LLMの中心的な役割は言語を理解し、文章を生成することです。",
+        "category": "LLMは言語を扱う言語モデルです。",
+        "contrast": "LLMは演算装置ではなく、言語を扱うモデルです。",
+    },
+    "Transformer": {
+        "label": "tech_transformer",
+        "definition": "TransformerはAttentionを中心に文脈を処理するニューラルネットワーク構造です。",
+        "role": "Transformerの中心的な役割はAttentionで情報間の関係を処理することです。",
+        "category": "TransformerはAttentionを使うニューラルネットワーク構造です。",
+        "contrast": "Transformerはプログラミング言語ではなく、Attentionを中心とするモデル構造です。",
+    },
+    "CUDA": {
+        "label": "tech_cuda",
+        "definition": "CUDAはNVIDIA GPUを汎用計算に利用するための技術です。",
+        "role": "CUDAの中心的な役割はNVIDIA GPU上で汎用計算を実行できるようにすることです。",
+        "category": "CUDAはNVIDIA GPU向けの計算技術です。",
+        "contrast": "CUDAはGPUというハードウェアそのものではなく、NVIDIA GPUを利用する計算技術です。",
+    },
+    "Python": {
+        "label": "tech_python",
+        "definition": "Pythonは読みやすい文法を持つ汎用プログラミング言語です。",
+        "role": "Pythonの中心的な役割はプログラムを記述し、さまざまな処理を実装することです。",
+        "category": "Pythonは汎用プログラミング言語です。",
+        "contrast": "PythonはGPUやCUDAのような演算装置やGPU技術ではなく、プログラミング言語です。",
+    },
+}
+
+
+TECHNICAL_SHARED_TEMPLATES = [
+    ("{name}の中心的な役割を説明してください。", "role"),
+    ("{name}を簡潔に定義してください。", "definition"),
+    ("{name}はどの種類の技術・モデル・装置ですか。", "category"),
+    ("{name}の性質を一文で説明してください。", "definition"),
+    ("{name}について、他の技術と混同しない説明をしてください。", "contrast"),
+    ("{name}の要点を名称を含めて答えてください。", "definition"),
+]
+
+
+def technical_minimal_pairs() -> List[Tuple[str, str, str]]:
+    rows = []
+    for name, info in TECHNICAL_CONCEPTS.items():
+        for template, answer_key in TECHNICAL_SHARED_TEMPLATES:
+            rows.append((
+                template.format(name=name),
+                str(info[answer_key]),
+                str(info["label"]),
+            ))
+    return rows
+
+
 RELATION_AUGMENT_ROWS: Sequence[Tuple[str, str]] = [
     (
         "CPUとGPUの役割の違いを説明してください。",
@@ -396,6 +470,9 @@ def augment_pairs(
 
     for prompt, answer in base_pairs:
         add(prompt, answer)
+
+    for prompt, answer, label in technical_minimal_pairs():
+        add(prompt, answer, label)
 
     for prompt, answer in RELATION_AUGMENT_ROWS:
         add(prompt, answer)
