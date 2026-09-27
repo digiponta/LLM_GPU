@@ -6756,3 +6756,74 @@ If both remain GPU-like:
   -> Blocks 4-6 adaptation at this learning rate/supervision is insufficient;
      a stronger encoder adaptation or additional contrastive semantic objective is needed.
 ```
+### v0.9.7 Output Alignment
+
+v0.9.6 showed a key mismatch: some prompts became CPU-like in the adapted
+semantic hidden representation, while the frozen LM head still generated
+GPU-like answers. v0.9.7 aligns the output layer to the adapted hidden space.
+
+Starting point:
+
+```text
+model/model-gpu-v0.9.6-semantic-encoder-adapted.pt
+```
+
+Trainable components:
+
+```text
+Blocks 1-3       frozen
+Blocks 4-6       trainable   LR 1e-6
+FinalNorm        trainable   LR 1e-6
+Semantic head    trainable   LR 1e-4
+LM head          trainable   LR 1e-6
+```
+
+The LM head is anchored to its v0.9.6 starting weights with a small MSE
+penalty so output geometry can follow the adapted hidden representation
+without freely drifting.
+
+Exact fixed 30-case prompts are still removed from augmented training rows
+when present. The experiment continues from v0.9.6 rather than retraining
+from the v0.8 base checkpoint.
+
+New checkpoint:
+
+```text
+model/model-gpu-v0.9.7-output-aligned.pt
+```
+
+New files:
+
+```text
+output_alignment_v097.py
+train_output_alignment_v097.py
+evaluate_output_alignment_v097.py
+run_output_alignment_v097.py
+```
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_output_alignment_v097.py
+```
+
+Primary diagnostic:
+
+```text
+G05 no-question
+  semantic head: tech_cpu > tech_gpu
+  desired generation: CPU / CPU-like
+```
+
+If this probe changes from GPU-like generation to CPU-like while semantic
+probabilities stay CPU-dominant, the v0.9.6 hidden-to-output misalignment
+hypothesis is supported.
+
+Log:
+
+```text
+results/output_alignment_v097/run.log
+```
