@@ -3845,3 +3845,85 @@ Semantic-content >= 26/30
 Strict composite > 25/30 if possible
 ```
 
+### v0.9.1 Semantic Attention Probe
+
+Balanced Semantic Tokens v0.8 equalized the three semantic-token norms, but
+G05 and G08 still did not improve. The next diagnostic therefore measures
+whether Blocks 4-6 actually attend from text positions to the semantic tokens.
+
+No training is performed.
+
+The probe inspects:
+
+```text
+G05 CPU reverse identification
+G08 Transformer structure
+G09 CUDA reference case
+```
+
+For every Transformer block after semantic-token insertion and every attention
+head, it reports:
+
+```text
+last prompt token -> SEM_IDENTITY
+last prompt token -> SEM_CONCEPT
+last prompt token -> SEM_HIERARCHY
+
+total last-token semantic attention mass
+mean text-to-semantic attention mass
+ratio to uniform-attention baseline
+```
+
+The uniform baseline is:
+
+```text
+semantic token count / visible key count
+```
+
+Interpretation:
+
+```text
+uniform_ratio < 1.0
+  semantic tokens are under-attended
+
+uniform_ratio ~ 1.0
+  semantic attention is approximately uniform
+
+uniform_ratio > 1.0
+  semantic tokens are preferentially attended
+```
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_semantic_attention_probe_v091.py
+```
+
+Direct probe:
+
+```powershell
+python semantic_attention_probe_v091.py --cases 5,8,9
+```
+
+Log:
+
+```text
+results/semantic_attention_probe_v091/probe.log
+```
+
+Decision rule:
+
+```text
+If G05 semantic representation remains correct
+but text-to-semantic attention is consistently weak,
+the next interface candidate is explicit Semantic Cross-Attention:
+
+Q = text hidden
+K,V = semantic tokens
+```
+
+This probe intentionally does not change any model parameter or checkpoint.
+
