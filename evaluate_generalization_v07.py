@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 from typing import Dict, List, Sequence, Tuple
 
@@ -96,6 +97,137 @@ CASES: List[Dict[str, object]] = [
 ]
 
 
+
+ENTITY_TERMS = {
+    "gpu": ["GPU"],
+    "cpu": ["CPU"],
+    "llm": ["LLM", "言語モデル"],
+    "transformer": ["Transformer"],
+    "cuda": ["CUDA"],
+    "python": ["Python"],
+    "capital": ["東京"],
+    "gpu_cpu": ["GPU", "CPU"],
+    "cuda_gpu": ["CUDA", "GPU"],
+    "llm_transformer": ["LLM", "Transformer"],
+}
+
+
+def _group_is_prompt_entity(
+    group: Sequence[str],
+    prompt: str,
+    intent: str,
+) -> bool:
+    expected = set(ENTITY_TERMS.get(intent, []))
+    if not expected:
+        return False
+
+    entity_hits = set(group) & expected
+    if not entity_hits:
+        return False
+
+    return any(term in prompt for term in entity_hits)
+
+
+def split_semantic_requirements(
+    prompt: str,
+    intent: str,
+    required_all: Sequence[Sequence[str]],
+) -> Tuple[List[Sequence[str]], List[Sequence[str]]]:
+    content_groups = []
+    entity_groups = []
+
+    for group in required_all:
+        if _group_is_prompt_entity(group, prompt, intent):
+            entity_groups.append(group)
+        else:
+            content_groups.append(group)
+
+    return content_groups, entity_groups
+
+
+def entity_explicitness(
+    text: str,
+    entity_groups: Sequence[Sequence[str]],
+) -> Tuple[bool, List[str]]:
+    if not entity_groups:
+        return True, []
+
+    missing = [
+        "/".join(group)
+        for group in entity_groups
+        if not any(term in text for term in group)
+    ]
+    return not missing, missing
+
+
+def fluency_check(text: str) -> Tuple[bool, List[str]]:
+    """Conservative deterministic surface-quality diagnostics."""
+    issues = []
+    stripped = text.strip()
+
+    if not stripped:
+        issues.append("empty")
+        return False, issues
+
+    if "�" in stripped:
+        issues.append("replacement-char")
+
+    if re.search(r"[A-Za-z_]{12,}", stripped):
+        issues.append("long-ascii-fragment")
+
+    if re.search(r"_[A-Za-z]", stripped):
+        issues.append("underscore-fragment")
+
+    if re.search(r"(.{2,10})\\1", stripped):
+        issues.append("repeated-fragment")
+
+    chunks = re.findall(r"[一-龯ぁ-んァ-ヶA-Za-z0-9]+", stripped)
+    counts = {}
+    for chunk in chunks:
+        if len(chunk) >= 2:
+            counts[chunk] = counts.get(chunk, 0) + 1
+    if counts and max(counts.values()) >= 4:
+        issues.append("excessive-repetition")
+
+    return not issues, issues
+
+
+def dimension_match(
+    text: str,
+    prompt: str,
+    intent: str,
+    required_all: Sequence[Sequence[str]],
+    forbidden: Sequence[str],
+):
+    content_groups, entity_groups = split_semantic_requirements(
+        prompt, intent, required_all
+    )
+
+    missing_content = [
+        "/".join(group)
+        for group in content_groups
+        if not any(term in text for term in group)
+    ]
+    conflicts = [term for term in forbidden if term in text]
+    semantic_ok = not missing_content and not conflicts
+
+    entity_ok, missing_entity = entity_explicitness(
+        text, entity_groups
+    )
+    fluent_ok, fluency_issues = fluency_check(text)
+
+    strict_ok = semantic_ok and entity_ok and fluent_ok
+    return {
+        "semantic_ok": semantic_ok,
+        "entity_ok": entity_ok,
+        "fluent_ok": fluent_ok,
+        "strict_ok": strict_ok,
+        "missing_content": missing_content,
+        "missing_entity": missing_entity,
+        "conflicts": conflicts,
+        "fluency_issues": fluency_issues,
+    }
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Held-out v0.7 generalization evaluation.")
     p.add_argument("--tokenizer", default=DEFAULT_TOKENIZER)
@@ -138,7 +270,11 @@ def main() -> None:
     print("Held-out cases  :", len(CASES))
     print()
 
-    total_pass = 0
+    legacy_pass = 0
+    semantic_pass = 0
+    entity_pass = 0
+    fluent_pass = 0
+    strict_pass = 0
     per_intent = {}
 
     for idx, case in enumerate(CASES, start=1):
@@ -154,39 +290,100 @@ def main() -> None:
             repetition_penalty=1.05,
         )
 
-        passed, missing, conflicts = semantic_match(
+        legacy_ok, legacy_missing, legacy_conflicts = semantic_match(
             reply,
             case["required_all"],
             case["forbidden"],
         )
-        total_pass += int(passed)
 
         intent = str(case["intent"])
-        ok, n = per_intent.get(intent, (0, 0))
-        per_intent[intent] = (ok + int(passed), n + 1)
+        dims = dimension_match(
+            reply,
+            prompt_text,
+            intent,
+            case["required_all"],
+            case["forbidden"],
+        )
+
+        legacy_pass += int(legacy_ok)
+        semantic_pass += int(dims["semantic_ok"])
+        entity_pass += int(dims["entity_ok"])
+        fluent_pass += int(dims["fluent_ok"])
+        strict_pass += int(dims["strict_ok"])
+
+        stats = per_intent.get(
+            intent,
+            {"semantic": 0, "strict": 0, "n": 0},
+        )
+        stats["semantic"] += int(dims["semantic_ok"])
+        stats["strict"] += int(dims["strict_ok"])
+        stats["n"] += 1
+        per_intent[intent] = stats
 
         print(f"[G{idx:02d}] {intent:14s} 人: {prompt_text}")
         print(f"      AI: {reply}")
-        print("      semantic=" + ("PASS" if passed else "MISS"))
-        if missing:
-            print("      missing : " + ", ".join(missing))
-        if conflicts:
-            print("      conflict: " + ", ".join(conflicts))
+        print(
+            "      semantic-content="
+            + ("PASS" if dims["semantic_ok"] else "MISS")
+            + " | entity="
+            + ("PASS" if dims["entity_ok"] else "MISS")
+            + " | fluency="
+            + ("PASS" if dims["fluent_ok"] else "MISS")
+            + " | strict="
+            + ("PASS" if dims["strict_ok"] else "MISS")
+        )
+        if dims["missing_content"]:
+            print("      missing-content: " + ", ".join(dims["missing_content"]))
+        if dims["missing_entity"]:
+            print("      missing-entity : " + ", ".join(dims["missing_entity"]))
+        if dims["conflicts"]:
+            print("      conflict       : " + ", ".join(dims["conflicts"]))
+        if dims["fluency_issues"]:
+            print("      fluency-issue  : " + ", ".join(dims["fluency_issues"]))
+        if legacy_ok != dims["strict_ok"]:
+            print(
+                "      legacy-rule    : "
+                + ("PASS" if legacy_ok else "MISS")
+            )
 
     count = len(CASES)
     print()
     print("Summary")
     print("-------")
     print(
-        f"Generalization semantic rate: {total_pass}/{count} "
-        f"({total_pass / count:.1%})"
+        f"Semantic-content rate : {semantic_pass}/{count} "
+        f"({semantic_pass / count:.1%})"
+    )
+    print(
+        f"Entity-explicit rate  : {entity_pass}/{count} "
+        f"({entity_pass / count:.1%})"
+    )
+    print(
+        f"Fluency rate          : {fluent_pass}/{count} "
+        f"({fluent_pass / count:.1%})"
+    )
+    print(
+        f"Strict composite rate : {strict_pass}/{count} "
+        f"({strict_pass / count:.1%})"
+    )
+    print(
+        f"Legacy rule rate      : {legacy_pass}/{count} "
+        f"({legacy_pass / count:.1%})"
     )
     print()
     print("Per-intent")
     print("----------")
+    print("intent         semantic      strict")
     for intent in sorted(per_intent):
-        ok, n = per_intent[intent]
-        print(f"{intent:14s}: {ok}/{n} ({ok / n:.1%})")
+        stats = per_intent[intent]
+        n = stats["n"]
+        sem = stats["semantic"]
+        strict = stats["strict"]
+        print(
+            f"{intent:14s}: "
+            f"{sem}/{n} ({sem / n:.1%})  "
+            f"{strict}/{n} ({strict / n:.1%})"
+        )
 
 
 if __name__ == "__main__":
