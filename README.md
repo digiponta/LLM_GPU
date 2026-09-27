@@ -4787,3 +4787,128 @@ technical held-out centroid accuracy does not regress
 Generation remains untouched until this program-composition hierarchy is
 validated.
 
+### v0.9.1 Semantic Encoder Adapter v0.8: Hierarchy-Constrained Semantic Head
+
+v0.7.2 showed that independent sigmoid outputs can learn the right concepts
+while still violating the ontology:
+
+```text
+program_execution
+>= instruction_sequence
+>= instruction_execution
+>= computation
+>= repeated_computation
+```
+
+could be reversed on individual prompts.
+
+v0.8 changes the head architecture instead of adding more paraphrases.
+
+For every hierarchical child:
+
+```text
+P(child)
+=
+P(parent) * P(child | parent)
+```
+
+Therefore parent-child ordering is guaranteed by construction.
+
+Examples:
+
+```text
+P(instruction_sequence)
+  = P(program_execution)
+    * P(instruction_sequence | program_execution)
+
+P(instruction_execution)
+  = P(instruction_sequence)
+    * P(instruction_execution | instruction_sequence)
+
+P(computation)
+  = P(instruction_execution)
+    * P(computation | instruction_execution)
+
+P(repeated_computation)
+  = P(computation)
+    * P(repeated_computation | computation)
+```
+
+The constrained hierarchy is:
+
+```text
+processor
+└─ program_execution
+   └─ instruction_sequence
+      ├─ instruction_execution
+      │  ├─ computation
+      │  │  ├─ arithmetic_logic
+      │  │  └─ repeated_computation
+      │  ├─ control_flow
+      │  ├─ memory_operation
+      │  └─ data_movement
+      └─ heterogeneous_instruction_stream
+
+processor also parents:
+  general_purpose
+  control_oriented
+  throughput_oriented
+  data_parallel
+```
+
+The semantic adapter and concept/attribute heads remain frozen:
+
+```text
+base encoder        : frozen
+semantic adapter    : frozen
+concept/attr heads  : frozen
+constrained head    : trainable
+generation          : unchanged
+```
+
+The head still returns logits, so existing code can continue to use:
+
+```python
+torch.sigmoid(hierarchy_head(hidden))
+```
+
+but the resulting marginals are already hierarchy constrained.
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_semantic_encoder_adapter_v08.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v0.9.1-semantic-adapter-v08.pt
+```
+
+Logs:
+
+```text
+results/semantic_encoder_adapter_v08/train.log
+results/semantic_encoder_adapter_v08/eval.log
+```
+
+Primary gate:
+
+```text
+zero parent-child hierarchy violations
+program >= sequence >= instruction >= computation
+computation >= arithmetic_logic
+computation >= repeated_computation
+instruction >= control_flow / memory_operation / data_movement
+G05 remains CPU
+G08 remains Transformer
+technical held-out centroid accuracy does not regress
+```
+
+Only semantic calibration can now fail; structural hierarchy ordering itself is
+not learnable and therefore cannot be violated.
+
