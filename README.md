@@ -6084,3 +6084,67 @@ If a moderate gamma flips G05 to CPU while preserving the benchmark:
 If G05 requires a very large gamma and other cases regress first:
   -> simple global gain is insufficient; correction must become concept-specific.
 ```
+### v0.12.2 G05 Top-K Logit Diagnostic
+
+This is a no-training diagnostic on the current-best v0.12.2 checkpoint.
+
+The previous gain sweep showed that CPU can outrank GPU at high gain while
+still failing to become the generated first token. This diagnostic identifies
+the actual vocabulary tokens that remain above CPU.
+
+For both G05 variants and each gain:
+
+```text
+gamma = 1.00, 1.50, 2.00, 2.50, 3.00
+```
+
+the script prints the top-10 vocabulary entries with:
+
+```text
+rank
+token id
+decoded token string
+base LM logit
+raw direct bias
+gamma-scaled effective bias
+final logit
+```
+
+It also lists every top-k token still outranking CPU and decomposes its gap:
+
+```text
+final gap vs CPU
+base-logit gap vs CPU
+effective-bias gap vs CPU
+```
+
+This distinguishes whether the blocker is mainly inherited from the base LM
+or is being reinforced by the semantic/entity direct-bias path.
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_g05_topk_logit_diagnostic_v0122.py
+```
+
+Log:
+
+```text
+results/g05_topk_logits_v0122/diagnostic.log
+```
+
+Primary interpretation:
+
+```text
+CPU < competitor because base_gap dominates
+  -> base LM prior is the main blocker.
+
+CPU < competitor because bias_gap dominates
+  -> direct semantic/entity adapter is promoting the wrong competitor.
+
+CPU becomes rank 1 but generated reply still differs
+  -> inspect token decoding / generation-step implementation.
+```
