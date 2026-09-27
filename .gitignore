@@ -6,6 +6,7 @@ venv/
 # Large local training data
 data/*.txt
 !data/conversation-ja.txt
+!data/instruction-ja.txt
 data/*.bz2
 data/*.xml
 
