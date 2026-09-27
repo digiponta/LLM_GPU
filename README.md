@@ -1890,3 +1890,82 @@ This is an inference-strength ablation only. The projection was trained at
 alpha=0.1, so results at other alpha values measure post-training scaling, not
 separately optimized projection checkpoints.
 
+### v0.9 Mid-Layer Intent Conditioning
+
+The inference-time alpha sweep showed no score change from alpha=0.0 through
+1.0 for the final-layer soft-intent method. v0.9 therefore adds a second,
+cleanly separated conditioning path that injects the soft intent signal inside
+the Transformer instead of immediately before the LM head.
+
+Default path:
+
+```text
+Prompt
+  -> frozen v0.8 Transformer prompt representation
+  -> frozen multi-label Intent Head
+  -> sigmoid probabilities (24 dims)
+  -> zero-initialized Linear(24 -> 256)
+  -> alpha * intent embedding
+  -> Transformer Block 1
+  -> Transformer Block 2
+  -> Transformer Block 3
+  -> ADD intent embedding
+  -> Transformer Block 4
+  -> Transformer Block 5
+  -> Transformer Block 6
+  -> final norm
+  -> LM head
+```
+
+The base language model and intent head remain frozen. Only the 24 -> 256
+projection is trained. This preserves the v0.8 pairwise-best checkpoint while
+allowing Blocks 4-6 to transform the injected semantic signal.
+
+Defaults:
+
+```text
+base model    : model/model-gpu-v0.8-chat-pairwise-best.pt
+intent head   : model/model-gpu-v0.8-intent-head.pt
+projection    : model/model-gpu-v0.9-mid-intent.pt
+inject-after  : 3
+alpha         : 0.1
+learning rate : 1e-3
+epochs        : 20
+```
+
+The projection is zero-initialized, so the initial conditioned path is an exact
+no-op before training.
+
+Train:
+
+```powershell
+git checkout v0.9
+git pull
+
+python train_mid_intent_v09.py
+```
+
+Evaluate on the unchanged 30-case benchmark:
+
+```powershell
+python evaluate_mid_intent_v09.py
+```
+
+Interactive chat:
+
+```powershell
+python chat_mid_intent_v09.py
+```
+
+The main baseline remains:
+
+```text
+Semantic-content : 22/30 = 73.3%
+Strict composite : 22/30 = 73.3%
+```
+
+The key cases are the prompts where intent recognition was already correct but
+generation failed, especially G14, G15, G18, and G28. Improvement there would
+support the hypothesis that the intent signal needs to enter the Transformer
+before the final LM head.
+
