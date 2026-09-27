@@ -186,7 +186,8 @@ class LanguageModel(nn.Module):
             "use_position_embedding": self.use_position_embedding,
         }
 
-    def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
+    def forward_hidden(self, token_ids: torch.Tensor) -> torch.Tensor:
+        """Return final normalized hidden states before the LM head."""
         if token_ids.dim() != 2:
             raise ValueError("token_ids must have shape [batch, time].")
 
@@ -206,8 +207,11 @@ class LanguageModel(nn.Module):
         for block in self.blocks:
             x = block(x)
 
-        x = self.final_norm(x)
-        return self.lm_head(x)
+        return self.final_norm(x)
+
+    def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
+        hidden = self.forward_hidden(token_ids)
+        return self.lm_head(hidden)
 
     @property
     def parameter_count(self) -> int:
