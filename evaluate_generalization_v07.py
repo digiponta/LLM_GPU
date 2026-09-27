@@ -98,6 +98,38 @@ CASES: List[Dict[str, object]] = [
 
 
 
+# Stronger semantic slots for cases where a single broad OR-group can create
+# false positives. Prompts are unchanged; only scoring is refined.
+SEMANTIC_SLOT_OVERRIDES = {
+    # G08 Transformer: must identify both the structure and Attention.
+    "Attentionを中心に使う代表的な構造は何ですか。": [
+        ["Transformer"],
+        ["Attention"],
+        ["構造", "モデル", "ニューラルネットワーク"],
+    ],
+    # G09 CUDA: name + GPU relation + technology/category.
+    "NVIDIA製GPUで汎用計算を行う仕組みを何と呼びますか。": [
+        ["CUDA"],
+        ["GPU"],
+        ["技術", "仕組み", "計算基盤", "汎用計算"],
+    ],
+    # G10 Python: name + language category.
+    "読みやすさで知られる汎用言語を一つ挙げてください。": [
+        ["Python"],
+        ["言語", "プログラミング言語"],
+    ],
+    # G21/G22 comparison: comparison action AND common conditions/metrics.
+    "二つの実験を公平に比べるにはどうしますか。": [
+        ["比較", "比べ", "差"],
+        ["条件", "指標", "同じ", "そろえ"],
+    ],
+    "モデルAとBの差を検証したいです。": [
+        ["比較", "比べ", "差", "検証"],
+        ["条件", "指標", "同じ", "そろえ"],
+    ],
+}
+
+
 ENTITY_TERMS = {
     "gpu": ["GPU"],
     "cpu": ["CPU"],
@@ -148,9 +180,10 @@ def split_semantic_requirements(
 def entity_explicitness(
     text: str,
     entity_groups: Sequence[Sequence[str]],
-) -> Tuple[bool, List[str]]:
+) -> Tuple[object, List[str]]:
+    """Return True/False when applicable, or None when entity scoring is N/A."""
     if not entity_groups:
-        return True, []
+        return None, []
 
     missing = [
         "/".join(group)
@@ -199,8 +232,12 @@ def dimension_match(
     required_all: Sequence[Sequence[str]],
     forbidden: Sequence[str],
 ):
+    scoring_groups = SEMANTIC_SLOT_OVERRIDES.get(
+        prompt,
+        list(required_all),
+    )
     content_groups, entity_groups = split_semantic_requirements(
-        prompt, intent, required_all
+        prompt, intent, scoring_groups
     )
 
     missing_content = [
@@ -216,7 +253,8 @@ def dimension_match(
     )
     fluent_ok, fluency_issues = fluency_check(text)
 
-    strict_ok = semantic_ok and entity_ok and fluent_ok
+    entity_required_ok = True if entity_ok is None else entity_ok
+    strict_ok = semantic_ok and entity_required_ok and fluent_ok
     return {
         "semantic_ok": semantic_ok,
         "entity_ok": entity_ok,
@@ -273,6 +311,8 @@ def main() -> None:
     legacy_pass = 0
     semantic_pass = 0
     entity_pass = 0
+    entity_total = 0
+    entity_na = 0
     fluent_pass = 0
     strict_pass = 0
     per_intent = {}
@@ -307,7 +347,11 @@ def main() -> None:
 
         legacy_pass += int(legacy_ok)
         semantic_pass += int(dims["semantic_ok"])
-        entity_pass += int(dims["entity_ok"])
+        if dims["entity_ok"] is None:
+            entity_na += 1
+        else:
+            entity_total += 1
+            entity_pass += int(dims["entity_ok"])
         fluent_pass += int(dims["fluent_ok"])
         strict_pass += int(dims["strict_ok"])
 
@@ -326,7 +370,11 @@ def main() -> None:
             "      semantic-content="
             + ("PASS" if dims["semantic_ok"] else "MISS")
             + " | entity="
-            + ("PASS" if dims["entity_ok"] else "MISS")
+            + (
+                "N/A"
+                if dims["entity_ok"] is None
+                else ("PASS" if dims["entity_ok"] else "MISS")
+            )
             + " | fluency="
             + ("PASS" if dims["fluent_ok"] else "MISS")
             + " | strict="
@@ -354,10 +402,14 @@ def main() -> None:
         f"Semantic-content rate : {semantic_pass}/{count} "
         f"({semantic_pass / count:.1%})"
     )
-    print(
-        f"Entity-explicit rate  : {entity_pass}/{count} "
-        f"({entity_pass / count:.1%})"
-    )
+    if entity_total:
+        print(
+            f"Entity-explicit rate  : {entity_pass}/{entity_total} "
+            f"({entity_pass / entity_total:.1%})"
+            f"  [N/A={entity_na}]"
+        )
+    else:
+        print(f"Entity-explicit rate  : N/A  [N/A={entity_na}]")
     print(
         f"Fluency rate          : {fluent_pass}/{count} "
         f"({fluent_pass / count:.1%})"
