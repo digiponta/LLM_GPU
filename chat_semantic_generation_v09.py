@@ -12,7 +12,6 @@ from typing import List, Tuple
 import torch
 import torch.nn.functional as F
 
-from model import LanguageModel
 from semantic_generation_integration_v09 import (
     forward_semantic_conditioned,
     infer_semantic_condition,
@@ -62,6 +61,7 @@ def build_prompt(history, user_text, history_turns):
 def compute_semantic_bias(
     semantic_model,
     semantic_adapter,
+    semantic_heads,
     hierarchy_head,
     projection,
     tokenizer,
@@ -72,15 +72,27 @@ def compute_semantic_bias(
     device = next(semantic_model.parameters()).device
     x = torch.tensor([context], dtype=torch.long, device=device)
 
-    adapted, hierarchy_prob = infer_semantic_condition(
+    (
+        adapted,
+        concept_prob,
+        attribute_prob,
+        hierarchy_prob,
+    ) = infer_semantic_condition(
         semantic_model,
         semantic_adapter,
+        semantic_heads,
         hierarchy_head,
         x,
         prompt_index=None,
     )
-    bias = projection(adapted, hierarchy_prob)
-    return bias, hierarchy_prob
+
+    bias = projection(
+        adapted,
+        concept_prob,
+        attribute_prob,
+        hierarchy_prob,
+    )
+    return bias, concept_prob, attribute_prob, hierarchy_prob
 
 
 @torch.no_grad()
@@ -88,6 +100,7 @@ def generate_reply(
     generation_model,
     semantic_model,
     semantic_adapter,
+    semantic_heads,
     hierarchy_head,
     projection,
     tokenizer,
@@ -105,12 +118,19 @@ def generate_reply(
     generation_model.eval()
     semantic_model.eval()
     semantic_adapter.eval()
+    semantic_heads.eval()
     hierarchy_head.eval()
     projection.eval()
 
-    semantic_bias, hierarchy_prob = compute_semantic_bias(
+    (
+        semantic_bias,
+        concept_prob,
+        attribute_prob,
+        hierarchy_prob,
+    ) = compute_semantic_bias(
         semantic_model,
         semantic_adapter,
+        semantic_heads,
         hierarchy_head,
         projection,
         tokenizer,
@@ -159,16 +179,18 @@ def generate_reply(
         if "\n" in decoded:
             break
 
-    reply = tokenizer.decode(
-        response_ids,
-        skip_special_tokens=True,
-    )
+    reply = tokenizer.decode(response_ids, skip_special_tokens=True)
 
     for marker in ("\n人:", "\nAI:", "\n"):
         if marker in reply:
             reply = reply.split(marker, 1)[0]
 
-    return reply.strip(), len(response_ids), hierarchy_prob[0].tolist()
+    details = {
+        "concept_prob": concept_prob[0].tolist(),
+        "attribute_prob": attribute_prob[0].tolist(),
+        "hierarchy_prob": hierarchy_prob[0].tolist(),
+    }
+    return reply.strip(), len(response_ids), details
 
 
 def main():
@@ -189,6 +211,7 @@ def main():
     (
         semantic_model,
         semantic_adapter,
+        semantic_heads,
         hierarchy_head,
         base_checkpoint,
         semantic_checkpoint,
@@ -212,6 +235,7 @@ def main():
     print("Base loss       :", base_checkpoint.get("loss"))
     print("Semantic loss   :", semantic_checkpoint.get("loss"))
     print("Integration loss:", integration_checkpoint.get("loss"))
+    print("Feature dim     :", projection.input_dim)
     print("Inject after    :", projection.inject_after)
     print("Alpha           :", projection.alpha)
     print()
@@ -232,10 +256,11 @@ def main():
         prompt = build_prompt(history, user_text, args.history_turns)
         started = time.perf_counter()
 
-        reply, count, hierarchy = generate_reply(
+        reply, count, details = generate_reply(
             generation_model,
             semantic_model,
             semantic_adapter,
+            semantic_heads,
             hierarchy_head,
             projection,
             tokenizer,
@@ -259,7 +284,7 @@ def main():
         print(f"[{count} tokens, {elapsed:.2f}s, {rate:.1f} tok/s]")
         print(
             "[hierarchy "
-            + ", ".join(f"{v:.3f}" for v in hierarchy)
+            + ", ".join(f"{v:.3f}" for v in details["hierarchy_prob"])
             + "]"
         )
         print()
