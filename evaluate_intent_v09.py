@@ -84,9 +84,9 @@ EXPECTED_TAGS: Dict[str, Set[str]] = {
     "不具合の原因を切り分けたいです。":
         {"debug_error"},
     "二つの実験を公平に比べるにはどうしますか。":
-        {"research_compare", "relation_compare"},
+        {"research_compare"},
     "モデルAとBの差を検証したいです。":
-        {"research_compare", "relation_compare"},
+        {"research_compare"},
 
     # General / conversation
     "日本で政府の中心となる都市はどこですか。":
