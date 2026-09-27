@@ -1,6 +1,6 @@
 # chat.py
 #
-# Interactive short-dialogue interface for LLM_GPU v0.5.
+# Interactive short-dialogue interface for LLM_GPU v0.6.
 # Generation is intentionally conservative for the very small model:
 # low temperature, small top-k, response-only repetition penalty, and
 # immediate stop on newline/EOS.
@@ -19,8 +19,8 @@ from model import LanguageModel
 from tokenizer import Tokenizer
 
 
-DEFAULT_TOKENIZER = "model/tokenizer.json"
-DEFAULT_MODEL = "model/model-gpu-v0.5-chat.pt"
+DEFAULT_TOKENIZER = "model/tokenizer-v0.6.json"
+DEFAULT_MODEL = "model/model-gpu-v0.6-chat.pt"
 
 USER_PREFIX = "人: "
 AI_PREFIX = "AI: "
@@ -28,18 +28,18 @@ AI_PREFIX = "AI: "
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Chat with the LLM_GPU v0.5 conversational model."
+        description="Chat with the LLM_GPU v0.6 conversational model."
     )
     parser.add_argument("--tokenizer", default=DEFAULT_TOKENIZER)
     parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--max-new-tokens", type=int, default=48)
-    parser.add_argument("--temperature", type=float, default=0.35)
-    parser.add_argument("--top-k", type=int, default=10)
+    parser.add_argument("--max-new-tokens", type=int, default=96)
+    parser.add_argument("--temperature", type=float, default=0.45)
+    parser.add_argument("--top-k", type=int, default=20)
     parser.add_argument("--repetition-penalty", type=float, default=1.05)
     parser.add_argument(
         "--history-turns",
         type=int,
-        default=1,
+        default=3,
         help="Previous turns included before the current user prompt.",
     )
     return parser.parse_args()
@@ -134,7 +134,7 @@ def main() -> None:
     if not model_path.exists():
         raise FileNotFoundError(
             f"Chat model not found: {model_path}. "
-            "Run python train_conversation.py first."
+            "Run python train_sft_v06.py first."
         )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -152,7 +152,7 @@ def main() -> None:
 
     print()
     print("====================================")
-    print(" LLM_GPU v0.5 Chat")
+    print(" LLM_GPU v0.6 Chat")
     print("====================================")
     print("Device          :", device)
     if device.type == "cuda":
