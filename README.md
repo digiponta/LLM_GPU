@@ -2417,3 +2417,72 @@ The main goal is to retain the v2 gains on `repeat` and `end` while
 restoring Python and preserving GPU/CPU and topic performance. Residual hard
 cases G05 CPU, G08 Transformer, and G12 short should be monitored separately.
 
+### v0.9 Boundary v4: Balanced Control Replay
+
+Boundary v3 restored Python and both end forms, while preserving GPU/CPU and
+topic, but repeat collapsed to 0/2. v4 therefore replaces the single protected
+replay strength with class-specific replay strengths.
+
+Balanced replay groups:
+
+```text
+stable protected group (repeat=2)
+  Python
+  GPU/CPU
+  topic
+  end
+
+control boundary group (repeat=3)
+  short
+  repeat
+```
+
+The v3 protected replay path is intentionally disabled in the dedicated v4
+runner so this experiment isolates class-specific replay balancing.
+
+Fixed settings:
+
+```text
+block LR            : 1e-5
+projection LR       : 1e-3
+alpha               : 0.1
+inject-after        : Block 3
+boundary v1         : enabled
+boundary v2         : enabled
+v3 protected replay : disabled
+balanced replay     : enabled
+stable repeat       : 2
+short/repeat repeat : 3
+LM Head             : frozen
+```
+
+Run:
+
+```powershell
+git checkout v0.9
+git pull
+
+python run_targeted_boundary_v4_v09.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v0.9-partial-intent-boundary-v4.pt
+```
+
+Logs:
+
+```text
+results/targeted_boundary_v4_v09/train.log
+results/targeted_boundary_v4_v09/eval.log
+```
+
+The balanced replay set contains 8 stable-protection prompts and 8
+short/repeat-control prompts. All 16 have zero exact prompt overlap with the
+fixed 30 development prompts.
+
+The main success condition is to restore repeat while keeping Python,
+GPU/CPU, topic, and both end forms correct. G05 CPU and G08 Transformer remain
+hard residuals to monitor separately.
+
