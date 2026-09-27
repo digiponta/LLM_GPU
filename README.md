@@ -3330,3 +3330,115 @@ technical held-out centroid accuracy does not regress
 
 Generation remains unchanged until the semantic hierarchy passes this gate.
 
+### v0.9 Semantic Adapter v0.5 -> Generation Conditioning Integration
+
+Semantic Encoder Adapter v0.5 passed the semantic integration gate:
+
+```text
+G05 centroid        : GPU -> CPU
+G05 processor       : 0.848
+G05 CPU-style score : 0.963
+G05 GPU-style score : 0.372
+G08                 : Transformer retained
+technical centroid  : 8/10 -> 9/10
+```
+
+The next experiment connects that semantic representation to generation.
+
+Frozen semantic path:
+
+```text
+v0.8 prompt encoder
+  -> Semantic Encoder Adapter v0.5
+  -> adapted semantic hidden       256
+  -> concept probabilities           6
+  -> attribute probabilities         4
+  -> hierarchy probabilities         5
+                                    ---
+                                    271 dims
+```
+
+Generation conditioning:
+
+```text
+271-d semantic feature
+  -> Linear(271 -> 256)
+  -> alpha = 0.1
+  -> inject after Transformer Block 3
+  -> Blocks 4-6
+  -> FinalNorm
+  -> LM Head
+```
+
+Training policy:
+
+```text
+semantic v0.8 encoder : frozen
+semantic adapter v0.5 : frozen
+semantic heads        : frozen
+hierarchy head        : frozen
+
+generation Blocks 1-3 : frozen
+generation Blocks 4-6 : trainable
+FinalNorm             : trainable
+LM Head               : frozen
+
+projection LR         : 1e-3
+Block 4-6 LR          : 1e-5
+Boundary data         : v1 only
+```
+
+The projection is zero-initialized, so conditioning begins as a no-op and the
+late Transformer blocks learn how to use the semantic signal.
+
+Run the complete experiment:
+
+```powershell
+git checkout v0.9
+git pull
+
+python run_semantic_generation_v09.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v0.9-semantic-generation-v05.pt
+```
+
+Logs:
+
+```text
+results/semantic_generation_v05/train.log
+results/semantic_generation_v05/eval.log
+```
+
+Standalone commands:
+
+```powershell
+python train_semantic_generation_integration_v09.py
+python evaluate_semantic_generation_v09.py
+python chat_semantic_generation_v09.py
+```
+
+The evaluation uses the unchanged fixed 30-case development benchmark. The
+reference remains the clean Boundary v1 result:
+
+```text
+Semantic-content : 25/30 = 83.3%
+Strict composite : 25/30 = 83.3%
+```
+
+Primary success conditions:
+
+```text
+G05 generation becomes CPU-correct
+G08 remains Transformer-correct
+strict composite >= 25/30
+no broad regression across other intents
+```
+
+CUDA G09 and acronym/full-name generalization remain separate residual semantic
+issues and are not treated as blockers for this first generation-integration
+experiment.
+
