@@ -7756,3 +7756,102 @@ semantic prediction remains CPU, this supports the hypothesis that the
 failure was driven by lexical/template bias in the training corpus.
 ```
 
+### v0.10.8: Base-Prior Ablation — Rebuild v0.8 from Pretraining
+
+v0.10.7 removed `多数` from the current SFT/alignment sources, but G05 still
+generated a GPU-like phrase containing `多数`. This indicates that the phrase
+can survive in the frozen/reused v0.8 base checkpoint.
+
+v0.10.8 therefore moves the ablation earlier in the training history and
+rebuilds the v0.8 language model from pretraining.
+
+Controlled pipeline:
+
+```text
+general-ja + data-nagato
+conversation-ja
+instruction-ja
+        |
+        | runtime lexical ablation:
+        |   多数 -> 多く
+        v
+train_mixed_v08_clean_prior.py
+        |
+        v
+model/model-gpu-v0.8-pretrain-clean.pt
+        |
+        | SFT sources already contain zero "多数"
+        v
+train_sft_v08.py
+        |
+        v
+model/model-gpu-v0.8-chat-clean.pt
+        |
+        v
+evaluate_generalization_v07.py
+```
+
+The architecture, tokenizer, pretraining sample count, curriculum mixture,
+SFT hyperparameters, technical repeat, and replay repeat remain aligned with
+the v0.8 experiment. Existing checkpoints are not overwritten.
+
+The clean-pretraining script removes `多数` from *all* text sources after
+loading them, including local `general-ja.txt` and `data-nagato.txt`.
+This prevents the word from being reintroduced through the general corpus.
+
+The v0.7 BPE tokenizer is intentionally kept fixed. A token may still exist in
+the vocabulary, but the rebuilt v0.8 model receives no pretraining/SFT exposure
+to the string `多数` in this experiment.
+
+New files:
+
+```text
+train_mixed_v08_clean_prior.py
+run_base_prior_ablation_v0108.py
+```
+
+Run the full controlled rebuild:
+
+```powershell
+git fetch origin
+git checkout v0.10.8
+git pull origin v0.10.8
+
+python run_base_prior_ablation_v0108.py
+```
+
+Outputs:
+
+```text
+model/model-gpu-v0.8-pretrain-clean.pt
+model/model-gpu-v0.8-chat-clean.pt
+model/model-gpu-v0.8-intent-head-clean.pt
+
+results/base_prior_ablation_v0108/pretrain.log
+results/base_prior_ablation_v0108/sft.log
+results/base_prior_ablation_v0108/evaluation.log
+```
+
+Primary question:
+
+```text
+Does G05 stop generating the memorized
+"多数の計算を並列に処理する..."
+GPU template when v0.8 itself is rebuilt without exposure to "多数"?
+```
+
+Interpretation:
+
+```text
+G05 improves toward CPU
+  -> strong evidence that the old v0.8 lexical prior caused the failure.
+
+G05 still emits 多数
+  -> the source is deeper than the rebuilt v0.8 text exposure
+     (for example tokenizer/generation dynamics or another data path).
+
+G05 removes 多数 but remains GPU-like
+  -> lexical memorization and semantic-to-generation binding are
+     separate contributing factors.
+```
+
