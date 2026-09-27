@@ -3580,3 +3580,126 @@ Semantic-content >= 26/30
 Strict composite > 25/30 if possible
 ```
 
+### v0.9.1 Semantic-to-Generation Interface v0.7: Semantic Token Conditioning
+
+v0.6 showed that the explicit semantic gates were correct, but additive hidden
+injection still did not force the language model to use those semantics during
+generation. G05 had a strong CPU gate and almost no GPU gate, yet the generated
+answer remained GPU-like.
+
+v0.7 therefore changes the interface itself.
+
+Instead of adding a semantic bias to the hidden state, v0.7 creates three
+virtual semantic tokens that are visible to Self-Attention:
+
+```text
+[SEM_IDENTITY]
+[SEM_CONCEPT]
+[SEM_HIERARCHY]
+[text hidden states...]
+```
+
+The tokens are inserted after Block 3. Blocks 4-6 therefore process the
+sequence:
+
+```text
+Blocks 1-3(text)
+        |
+        +-- prepend semantic tokens
+        |
+        v
+Blocks 4-6(Self-Attention over semantic tokens + text)
+        |
+     FinalNorm
+        |
+remove semantic-token output positions
+        |
+      LM Head
+```
+
+Semantic token definitions:
+
+```text
+SEM_IDENTITY
+  adapted semantic hidden (256)
+    -> Linear(256 -> 256)
+
+SEM_CONCEPT
+  concept probabilities (6)
+  + attribute probabilities (4)
+    -> Linear(10 -> 256)
+
+SEM_HIERARCHY
+  hierarchy probabilities (5)
+    -> Linear(5 -> 256)
+```
+
+The token projectors start with a very small initialization rather than exact
+zero, so an attention path exists from the beginning while the influence is
+still initially small.
+
+Training policy:
+
+```text
+semantic encoder       : frozen
+semantic adapter v0.5  : frozen
+semantic heads         : frozen
+hierarchy head         : frozen
+
+generation Blocks 1-3  : frozen
+generation Blocks 4-6  : trainable
+FinalNorm              : trainable
+LM Head                : frozen
+
+Boundary data          : v1 only
+projector LR           : 1e-3
+block LR               : 1e-5
+semantic token count   : 3
+token scale            : 1.0
+insert after           : Block 3
+```
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_semantic_token_conditioning_v091.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v0.9.1-semantic-token-v07.pt
+```
+
+Logs:
+
+```text
+results/semantic_token_conditioning_v091/train.log
+results/semantic_token_conditioning_v091/eval.log
+```
+
+Reference:
+
+```text
+v0.9 semantic integration:
+Semantic-content : 26/30 = 86.7%
+Strict composite : 25/30 = 83.3%
+
+v0.6 semantic gated:
+Semantic-content : 25/30 = 83.3%
+Strict composite : 24/30 = 80.0%
+```
+
+Primary targets:
+
+```text
+G05 CPU becomes generation-correct
+G08 Transformer remains correct and fluency improves
+G09 CUDA remains correct
+Semantic-content >= 26/30
+Strict composite > 25/30 if possible
+```
+
