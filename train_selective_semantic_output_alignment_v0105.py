@@ -15,7 +15,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 
-from augment_sft_v07 import augment_pairs, classify_intent
+from augment_sft_v07 import augment_pairs
 from mid_intent_conditioning_v09 import validate_injection_point
 from model import LanguageModel
 from semantic_aware_lm_head_v010 import (
@@ -62,6 +62,18 @@ ENTITY_TARGETS = {
     "tech_python": "Python",
 }
 TECHNICAL_INTENTS = set(ENTITY_TARGETS)
+ALIGNMENT_BLOCK_TAGS = {
+    "control_short",
+    "control_topic",
+    "control_repeat",
+    "control_end",
+    "debug_error",
+    "research_compare",
+    "greeting",
+    "fatigue",
+    "thanks",
+    "capital",
+}
 
 
 class SelectiveAlignmentDataset(Dataset):
@@ -70,9 +82,11 @@ class SelectiveAlignmentDataset(Dataset):
     def __init__(self, rows, tokenizer, context_length):
         self.base = PartialIntentDataset(rows, tokenizer, context_length)
         self.gates = []
-        for user_text, _answer_text, _tags in rows:
-            label = classify_intent(user_text)
-            self.gates.append(1.0 if label in TECHNICAL_INTENTS else 0.0)
+        for _user_text, _answer_text, tags in rows:
+            tag_set = set(tags)
+            has_technical = bool(tag_set & TECHNICAL_INTENTS)
+            has_blocking = bool(tag_set & ALIGNMENT_BLOCK_TAGS)
+            self.gates.append(1.0 if has_technical and not has_blocking else 0.0)
 
     def __len__(self):
         return len(self.base)
@@ -541,8 +555,9 @@ def main():
     print("Projection             : 281 -> 256")
     print("Consistency head       : 256 -> 25")
     print("Consistency weight     :", args.consistency_weight)
-    print("Alignment gate         : technical intents only")
-    print("Technical intents      :", ", ".join(sorted(TECHNICAL_INTENTS)))
+    print("Alignment gate         : technical tags only, control/debug/research blocked")
+    print("Technical tags         :", ", ".join(sorted(TECHNICAL_INTENTS)))
+    print("Blocked gate tags      :", ", ".join(sorted(ALIGNMENT_BLOCK_TAGS)))
     print("Entity alignment weight:", args.alignment_weight)
     print("Entity alignment margin:", args.alignment_margin)
     print("Alignment confidence   :", args.alignment_confidence)
