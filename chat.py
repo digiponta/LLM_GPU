@@ -1,6 +1,6 @@
 # chat.py
 #
-# Interactive short-dialogue interface for LLM_GPU v0.6.
+# Interactive short-dialogue interface for LLM_GPU v0.7.
 # Generation is intentionally conservative for the very small model:
 # low temperature, small top-k, response-only repetition penalty, and
 # immediate stop on newline/EOS.
@@ -16,11 +16,11 @@ import torch
 import torch.nn.functional as F
 
 from model import LanguageModel
-from tokenizer import Tokenizer
+from tokenizer_bpe import Tokenizer
 
 
-DEFAULT_TOKENIZER = "model/tokenizer-v0.6.json"
-DEFAULT_MODEL = "model/model-gpu-v0.6-chat.pt"
+DEFAULT_TOKENIZER = "model/tokenizer-v0.7-bpe.json"
+DEFAULT_MODEL = "model/model-gpu-v0.7-chat.pt"
 
 USER_PREFIX = "人: "
 AI_PREFIX = "AI: "
@@ -28,7 +28,7 @@ AI_PREFIX = "AI: "
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Chat with the LLM_GPU v0.6 conversational model."
+        description="Chat with the LLM_GPU v0.7 conversational model."
     )
     parser.add_argument("--tokenizer", default=DEFAULT_TOKENIZER)
     parser.add_argument("--model", default=DEFAULT_MODEL)
@@ -134,7 +134,7 @@ def main() -> None:
     if not model_path.exists():
         raise FileNotFoundError(
             f"Chat model not found: {model_path}. "
-            "Run python train_sft_v06.py first."
+            "Run python train_sft_v07.py first."
         )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -152,7 +152,7 @@ def main() -> None:
 
     print()
     print("====================================")
-    print(" LLM_GPU v0.6 Chat")
+    print(" LLM_GPU v0.7 Chat")
     print("====================================")
     print("Device          :", device)
     if device.type == "cuda":
