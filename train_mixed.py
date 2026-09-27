@@ -136,7 +136,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="LLM_GPU v0.6 mixed pretraining."
     )
-    parser.add_argument("--samples", type=int, default=1_000_000)
+    parser.add_argument("--samples", type=int, default=500_000)
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
