@@ -5867,3 +5867,46 @@ G28 -> CPU
 G08/G09/G10 retained
 non-entity behavior retained
 ```
+### Current Best Status after v0.12.3
+
+Current best semantic/entity-generation checkpoint:
+
+```text
+model/model-gpu-v0.9.1-entity-contrastive-logit-v0122.pt
+```
+
+Status:
+
+```text
+v0.12.2 Entity Contrastive Logit Alignment
+  -> CURRENT BEST
+
+v0.12.3 CPU-GPU Local Margin Refinement
+  -> FAILED EXPERIMENT
+  -> retained for reproducibility and analysis
+  -> not recommended as the default checkpoint
+```
+
+Reason:
+
+v0.12.3 improved its local training/validation objective, but it generalized
+in the wrong direction on the held-out G05 prompts. Compared with v0.12.2,
+the CPU-GPU final margin became substantially worse and G28 regressed to a
+GPU-first answer.
+
+Observed G05 comparison:
+
+```text
+Original G05
+  v0.12.2 margin : -1.6826
+  v0.12.3 margin : -4.4354
+  delta          : -2.7527
+
+Name-request G05
+  v0.12.2 margin : -1.1942
+  v0.12.3 margin : -4.4082
+  delta          : -3.2140
+```
+
+Therefore, subsequent experiments should start from v0.12.2 unless a later
+experiment explicitly establishes a better held-out result.
