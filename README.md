@@ -4674,3 +4674,116 @@ technical held-out centroid accuracy does not regress
 Generation remains untouched until this final semantic relation gate is
 evaluated.
 
+### v0.9.1 Semantic Encoder Adapter v0.7.2: Program Composition Hierarchy
+
+v0.7.1 fixed the G05 relation:
+
+```text
+instruction_execution > computation
+```
+
+but one remaining failure appeared at the program-composition level:
+
+```text
+program processing
+  = computation + branch + load + store
+```
+
+was still represented too strongly as `computation`.
+
+v0.7.2 therefore adds two explicit upper-level semantic axes:
+
+```text
+program_execution
+instruction_sequence
+```
+
+and extends the hierarchy to:
+
+```text
+program_execution
+└─ instruction_sequence
+   └─ instruction_execution
+      ├─ computation
+      │  ├─ arithmetic_logic
+      │  └─ repeated_computation
+      ├─ control_flow
+      ├─ memory_operation
+      ├─ data_movement
+      └─ heterogeneous_instruction_stream
+```
+
+The key semantic distinction is:
+
+```text
+program execution != computation only
+```
+
+A program is executed through an instruction sequence, and that sequence can
+contain computation, control, memory operations, and data movement.
+
+The previous semantic geometry is preserved:
+
+```text
+base encoder        : frozen
+semantic adapter    : frozen
+concept/attr heads  : frozen
+15-axis hierarchy   : trainable
+generation          : unchanged
+```
+
+Relation constraints include:
+
+```text
+instruction_sequence <= program_execution
+instruction_execution <= instruction_sequence
+computation <= instruction_execution
+arithmetic_logic <= computation
+repeated_computation <= computation
+control_flow <= instruction_execution
+memory_operation <= instruction_execution
+data_movement <= instruction_execution
+heterogeneous_instruction_stream <= instruction_sequence
+```
+
+Additional margin constraints keep both `program_execution` and
+`instruction_sequence` broader than `computation`.
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_semantic_encoder_adapter_v072.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v0.9.1-semantic-adapter-v072.pt
+```
+
+Logs:
+
+```text
+results/semantic_encoder_adapter_v072/train.log
+results/semantic_encoder_adapter_v072/eval.log
+```
+
+Primary gate:
+
+```text
+program_execution >= instruction_sequence
+instruction_sequence >= instruction_execution
+program_execution > computation
+instruction_sequence > computation
+computation/control/memory remain below instruction_execution
+G05 remains CPU and instruction_execution > computation
+G08 Transformer remains correct
+technical held-out centroid accuracy does not regress
+```
+
+Generation remains untouched until this program-composition hierarchy is
+validated.
+
