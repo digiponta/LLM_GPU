@@ -2486,3 +2486,77 @@ The main success condition is to restore repeat while keeping Python,
 GPU/CPU, topic, and both end forms correct. G05 CPU and G08 Transformer remain
 hard residuals to monitor separately.
 
+### v0.9 LM-Head Partial Unfreeze experiment
+
+Boundary v4 regressed to 23/30, while Boundary v1 remained the cleanest
+25/30 result without later replay interference. The next experiment therefore
+returns to Boundary v1 data and changes only one architectural degree of
+freedom: the LM head is partially unfrozen with a very small learning rate.
+
+Trainable parameter groups:
+
+```text
+Intent projection : 1e-3
+Blocks 4-6        : 1e-5
+FinalNorm         : 1e-5
+LM Head           : 1e-6
+```
+
+Frozen:
+
+```text
+Blocks 1-3
+intent model
+intent head
+```
+
+Boundary configuration:
+
+```text
+Boundary v1 : enabled
+Boundary v2 : disabled
+v3 replay   : disabled
+v4 replay   : disabled
+```
+
+This isolates whether limited output-token adaptation can solve hard residuals
+such as:
+
+```text
+G05 CPU reverse identification
+G08 Transformer category completion
+```
+
+without reintroducing the data-interference effects seen in Boundary v2-v4.
+
+Run:
+
+```powershell
+git checkout v0.9
+git pull
+
+python run_lm_head_unfreeze_v09.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v0.9-partial-intent-lmhead.pt
+```
+
+Logs:
+
+```text
+results/lm_head_unfreeze_v09/train.log
+results/lm_head_unfreeze_v09/eval.log
+```
+
+Reference:
+
+```text
+Boundary v1 Semantic : 25/30 = 83.3%
+Boundary v1 Strict   : 25/30 = 83.3%
+```
+
+Regression watch items include Python, GPU/CPU, topic, end, repeat, and compare.
+
