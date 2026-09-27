@@ -6343,3 +6343,67 @@ If direct CPU/GPU definitions are correct and G05 is also CPU-like:
 If direct CPU/GPU definitions are correct but G05 remains GPU-like:
   -> the residual problem lies in intent/semantic-to-generation routing for the G05 wording.
 ```
+### v0.9.2 Implicit CPU Intent Correction
+
+This experiment targets the remaining G05 failure after CPU-definition retraining.
+The corrected v0.9.1 projection already answers direct CPU/GPU definition prompts correctly,
+but the frozen v0.8 intent head still routes implicit CPU descriptions toward `tech_gpu`
+or even `debug_error`.
+
+Architecture:
+
+```text
+v0.8 base LM                 frozen
+v0.8 intent head             fine-tuned
+v0.9.1 CPU-definition projection  frozen
+```
+
+Training uses only curated implicit CPU/GPU paraphrases and protected replay.
+The exact fixed G05 prompts are explicitly excluded.
+
+Target conditions:
+
+```text
+implicit CPU rows: tech_cpu > tech_gpu
+implicit CPU rows: tech_cpu > debug_error
+GPU rows         : tech_gpu > tech_cpu
+```
+
+A small distillation term keeps the corrected head close to the original v0.8 intent head
+outside the targeted boundary.
+
+New checkpoint:
+
+```text
+model/model-gpu-v0.9.2-intent-head-implicit-cpu.pt
+```
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_implicit_cpu_intent_v092.py
+```
+
+The runner trains only the intent head, then compares old vs new probabilities on:
+
+```text
+CPU direct
+GPU direct
+Original G05
+Name-request G05
+implicit CPU paraphrase
+implicit GPU paraphrase
+debug/error replay
+```
+
+It also generates replies through the frozen corrected v0.9.1 projection under
+`temperature=0` and `history=0`.
+
+Log:
+
+```text
+results/implicit_cpu_intent_v092/run.log
+```
