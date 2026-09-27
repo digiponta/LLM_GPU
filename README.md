@@ -5517,3 +5517,107 @@ old G05 MISS + name-request G05 MISS
 The fixed 30-case benchmark is intentionally left unchanged until this
 controlled prompt comparison is measured.
 
+### v0.9.1 v0.12: Semantic / Lexical -> Logit Alignment
+
+v0.11.1 showed that changing G05 wording to explicitly ask for the device name
+did not make generation emit CPU. The frozen semantic and lexical paths still
+identify CPU, so v0.12 moves the intervention closer to the actual token
+decision.
+
+The existing v0.11 model is frozen. A new low-rank adapter maps the same
+345-dimensional condition directly into vocabulary logits:
+
+```text
+v0.8 constrained semantic features  : 281
+v0.10.2 lexical identity            :  64
+                                      ---
+condition                            : 345
+
+345
+ -> LayerNorm
+ -> Linear(345 -> 64)
+ -> GELU
+ -> Linear(64 -> vocab)
+ -> beta * direct logit bias
+```
+
+The final token decision is:
+
+```text
+frozen v0.11 LM logits
++
+semantic / lexical direct logit bias
+=
+token logits
+```
+
+For this first controlled experiment the bias is applied only to the first
+assistant token. This isolates entity/answer selection and avoids perturbing
+the rest of the generated sentence.
+
+Training policy:
+
+```text
+v0.11 generation model/projection : frozen
+v0.8 semantic path                : frozen
+v0.10.2 CPU name binding          : frozen
+LM Head                           : frozen
+direct logit adapter              : trainable
+rank                              : 64
+beta                              : 0.10
+learning rate                     : 5e-4
+application                       : first assistant token only
+```
+
+The adapter is trained against the actual frozen v0.11 first-token logits:
+
+```text
+combined_logits
+=
+frozen_v0.11_first_token_logits
++
+direct_semantic_lexical_bias
+```
+
+so it learns a correction to the real model decision rather than an isolated
+vocabulary classifier.
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_semantic_lexical_logit_alignment_v012.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v0.9.1-semantic-lexical-logit-v012.pt
+```
+
+Logs:
+
+```text
+results/semantic_lexical_logit_v012/train.log
+results/semantic_lexical_logit_v012/eval.log
+```
+
+Evaluation includes the fixed 30-case benchmark plus both G05 wordings and
+prints the top direct-bias vocabulary tokens.
+
+Primary targets:
+
+```text
+Original G05 -> CPU name
+Name-request G05 -> CPU name
+G04/G06 CPU retained
+G08 Transformer retained
+G09 CUDA retained
+G27 GPU retained
+G28 CPU retained
+semantic >= 26/30
+strict >= 26/30
+```
+
