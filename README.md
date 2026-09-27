@@ -7438,3 +7438,127 @@ Primary success criteria:
 6. Global alignment loss decreases without destabilizing validation LM loss.
 ```
 
+### v0.10.5: Selective Semantic Output Alignment
+
+v0.10.4 proved that global vocabulary alignment can repair direct entity
+selection such as G28, but applying it to every row destabilized unrelated
+conversation behavior.
+
+Observed v0.10.4 result:
+
+```text
+Semantic-content       : 17/30
+Strict composite       : 16/30
+Direct entity          : 5/6
+Corrected strict       : 16/30
+
+G28                     : repaired to CPU
+G08                     : direct Transformer preserved
+G05                     : still GPU-like despite semantic CPU
+
+Nontechnical regressions:
+topic / repeat / end / compare rows were pulled toward technical entities.
+```
+
+v0.10.5 introduces an explicit supervised alignment gate.
+
+Alignment is active only when the training-row intent is one of:
+
+```text
+tech_gpu
+tech_cpu
+tech_llm
+tech_transformer
+tech_cuda
+tech_python
+```
+
+For all other rows, entity/global/continuation alignment losses are exactly
+zero. Normal LM loss and semantic-consistency loss remain active.
+
+Conceptually:
+
+```text
+prompt
+  |
+  +-- technical intent ----> LM + consistency
+  |                          + entity alignment
+  |                          + global alignment
+  |                          + short continuation alignment
+  |
+  +-- nontechnical intent --> LM + consistency only
+```
+
+The selective objective is:
+
+```text
+technical row:
+L_total =
+    L_LM
+  + 0.50 * L_semantic_consistency
+  + 0.05 * L_entity_alignment
+  + 0.02 * L_global_alignment
+  + 0.02 * L_first4_continuation
+
+nontechnical row:
+L_total =
+    L_LM
+  + 0.50 * L_semantic_consistency
+```
+
+Default settings:
+
+```text
+Consistency weight       : 0.50
+LM Head LR               : 3e-6
+Blocks 4-6 LR            : 1e-5
+Projection LR            : 1e-3
+Consistency-head LR      : 1e-3
+
+Entity alignment weight  : 0.05
+Entity alignment margin  : 0.75
+Global alignment weight  : 0.02
+Global alignment margin  : 0.50
+Continuation weight      : 0.02
+Continuation tokens      : 4
+Alignment confidence     : 0.70
+```
+
+New files:
+
+```text
+train_selective_semantic_output_alignment_v0105.py
+evaluate_selective_semantic_output_alignment_v0105.py
+run_selective_semantic_output_alignment_v0105.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v0.10.5
+git pull origin v0.10.5
+
+python run_selective_semantic_output_alignment_v0105.py
+```
+
+Outputs:
+
+```text
+model/model-gpu-v0.10.5-selective-semantic-output-aligned.pt
+results/selective_semantic_output_alignment_v0105/train.log
+results/selective_semantic_output_alignment_v0105/evaluation.log
+```
+
+Primary success criteria:
+
+```text
+1. Recover nontechnical behavior lost in v0.10.4.
+2. Preserve G28 direct CPU correction.
+3. Preserve G08 direct Transformer correction.
+4. Improve G05 toward direct CPU generation.
+5. Direct-entity rate remains >= 5/6.
+6. Corrected strict score recovers toward the v0.10.2 27/30 level.
+7. No broad GPU/Transformer leakage into topic/repeat/end/compare prompts.
+```
+
