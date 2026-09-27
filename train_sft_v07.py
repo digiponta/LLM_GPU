@@ -1,6 +1,9 @@
 # train_sft_v07.py
 #
-# LLM_GPU v0.7 assistant-only SFT using the v0.7 byte-level BPE tokenizer.
+# LLM_GPU v0.7 multi-task SFT:
+#   1) assistant answer next-token loss
+#   2) prompt intent classification auxiliary loss
+# plus deterministic intent-aware paraphrase augmentation.
 
 from __future__ import annotations
 
@@ -9,12 +12,14 @@ import math
 import random
 import time
 from pathlib import Path
-from typing import List, Sequence, Tuple
+from typing import Dict, List, Sequence, Tuple
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 
+from augment_sft_v07 import augment_pairs, classify_intent
 from model import LanguageModel
 from tokenizer_bpe import Tokenizer
 
@@ -22,6 +27,7 @@ from tokenizer_bpe import Tokenizer
 DEFAULT_TOKENIZER = "model/tokenizer-v0.7-bpe.json"
 DEFAULT_BASE_MODEL = "model/model-gpu-v0.7-pretrain.pt"
 DEFAULT_OUTPUT_MODEL = "model/model-gpu-v0.7-chat.pt"
+DEFAULT_INTENT_HEAD = "model/model-gpu-v0.7-intent-head.pt"
 DEFAULT_DATA = "data/conversation-ja.txt"
 DEFAULT_INSTRUCTION_DATA = "data/instruction-ja.txt"
 
@@ -32,21 +38,24 @@ REQUIRE_CUDA = True
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Assistant-only SFT for LLM_GPU v0.7."
+    p = argparse.ArgumentParser(
+        description="Multi-task augmented SFT for LLM_GPU v0.7."
     )
-    parser.add_argument("--data", default=DEFAULT_DATA)
-    parser.add_argument("--instruction-data", default=DEFAULT_INSTRUCTION_DATA)
-    parser.add_argument("--tokenizer", default=DEFAULT_TOKENIZER)
-    parser.add_argument("--base-model", default=DEFAULT_BASE_MODEL)
-    parser.add_argument("--output", default=DEFAULT_OUTPUT_MODEL)
-    parser.add_argument("--epochs", type=int, default=30)
-    parser.add_argument("--learning-rate", type=float, default=1e-5)
-    parser.add_argument("--batch-size", type=int, default=16)
-    parser.add_argument("--validation-ratio", type=float, default=0.15)
-    parser.add_argument("--patience", type=int, default=5)
-    parser.add_argument("--label-smoothing", type=float, default=0.02)
-    return parser.parse_args()
+    p.add_argument("--data", default=DEFAULT_DATA)
+    p.add_argument("--instruction-data", default=DEFAULT_INSTRUCTION_DATA)
+    p.add_argument("--tokenizer", default=DEFAULT_TOKENIZER)
+    p.add_argument("--base-model", default=DEFAULT_BASE_MODEL)
+    p.add_argument("--output", default=DEFAULT_OUTPUT_MODEL)
+    p.add_argument("--intent-head-output", default=DEFAULT_INTENT_HEAD)
+    p.add_argument("--epochs", type=int, default=30)
+    p.add_argument("--learning-rate", type=float, default=1e-5)
+    p.add_argument("--batch-size", type=int, default=16)
+    p.add_argument("--validation-ratio", type=float, default=0.15)
+    p.add_argument("--patience", type=int, default=5)
+    p.add_argument("--label-smoothing", type=float, default=0.02)
+    p.add_argument("--intent-loss-weight", type=float, default=0.25)
+    p.add_argument("--variants-per-intent", type=int, default=24)
+    return p.parse_args()
 
 
 def select_device() -> torch.device:
@@ -106,83 +115,52 @@ def deduplicate_pairs(
     return output
 
 
-def intent_group(text: str) -> str:
-    """Coarse intent grouping used only to make validation more balanced."""
-    upper = text.upper()
-    technical = (
-        "GPU", "CPU", "LLM", "TRANSFORMER", "CUDA", "PYTHON"
-    )
-    for name in technical:
-        if name in upper:
-            return f"tech:{name.lower()}"
-
-    rules = [
-        ("control:short", ("短く", "簡潔", "要点")),
-        ("control:topic", ("話題", "別の話", "違う話")),
-        ("control:repeat", ("もう一度", "分かりやす", "説明")),
-        ("control:end", ("ここまで", "終わり", "終わります")),
-        ("debug:error", ("エラー", "動かない", "失敗")),
-        ("research:compare", ("比較", "比べ", "実験結果")),
-        ("greeting", ("こんにちは", "おはよう", "こんばんは", "元気")),
-        ("fatigue", ("疲れ", "眠い")),
-    ]
-    for label, keys in rules:
-        if any(key in text for key in keys):
-            return label
-    return "other"
-
-
 def stratified_split(
-    pairs: Sequence[Tuple[str, str]],
+    rows: Sequence[Tuple[str, str, str]],
     validation_ratio: float,
     seed: int,
-) -> Tuple[List[Tuple[str, str]], List[Tuple[str, str]]]:
-    """Split within intent groups so rare technical intents stay represented."""
-    groups = {}
-    for pair in pairs:
-        groups.setdefault(intent_group(pair[0]), []).append(pair)
+):
+    groups: Dict[str, List[Tuple[str, str, str]]] = {}
+    for row in rows:
+        groups.setdefault(row[2], []).append(row)
 
     rng = random.Random(seed)
-    train_pairs = []
-    val_pairs = []
+    train_rows = []
+    val_rows = []
 
     for label in sorted(groups):
         items = list(groups[label])
         rng.shuffle(items)
 
-        if len(items) >= 4:
+        if len(items) >= 5:
             count = max(1, int(round(len(items) * validation_ratio)))
-            count = min(count, len(items) - 2)
-        elif len(items) == 3:
+            count = min(count, len(items) - 3)
+        elif len(items) >= 3:
             count = 1
         else:
             count = 0
 
-        val_pairs.extend(items[:count])
-        train_pairs.extend(items[count:])
+        val_rows.extend(items[:count])
+        train_rows.extend(items[count:])
 
-    rng.shuffle(train_pairs)
-    rng.shuffle(val_pairs)
-
-    if not val_pairs:
-        shuffled = list(pairs)
-        rng.shuffle(shuffled)
-        val_pairs = shuffled[:1]
-        train_pairs = shuffled[1:]
-
-    return train_pairs, val_pairs
+    rng.shuffle(train_rows)
+    rng.shuffle(val_rows)
+    if not val_rows:
+        raise RuntimeError("Validation split is empty.")
+    return train_rows, val_rows
 
 
-class ConversationDataset(Dataset):
+class MultiTaskDataset(Dataset):
     def __init__(
         self,
-        pairs: Sequence[Tuple[str, str]],
+        rows: Sequence[Tuple[str, str, str]],
         tokenizer: Tokenizer,
         context_length: int,
+        label_to_id: Dict[str, int],
     ):
         self.rows = []
 
-        for user_text, answer_text in pairs:
+        for user_text, answer_text, intent in rows:
             prompt = f"{USER_PREFIX}{user_text}\n{AI_PREFIX}"
             prompt_ids = tokenizer.encode(prompt, add_bos=True)
             answer_ids = tokenizer.encode(answer_text, add_eos=True)
@@ -193,65 +171,117 @@ class ConversationDataset(Dataset):
                 prompt_ids = prompt_ids[-keep_prompt:]
 
             if len(prompt_ids) + len(answer_ids) > max_sequence:
-                answer_room = max_sequence - len(prompt_ids)
-                answer_ids = answer_ids[:answer_room]
+                room = max_sequence - len(prompt_ids)
+                answer_ids = answer_ids[:room]
                 if answer_ids:
                     answer_ids[-1] = tokenizer.eos_id
 
             sequence = prompt_ids + answer_ids
             answer_start = len(prompt_ids)
+
             x = sequence[:-1]
             y = sequence[1:]
-            mask = [
+            lm_mask = [
                 1.0 if (i + 1) >= answer_start else 0.0
                 for i in range(len(y))
             ]
 
+            # Last prompt token in x is the representation used for intent.
+            prompt_index = min(max(0, answer_start - 1), len(x) - 1)
+
             pad_count = context_length - len(x)
+            if pad_count < 0:
+                raise RuntimeError("SFT row exceeded context length.")
             x += [tokenizer.pad_id] * pad_count
             y += [tokenizer.pad_id] * pad_count
-            mask += [0.0] * pad_count
+            lm_mask += [0.0] * pad_count
 
             self.rows.append((
                 torch.tensor(x, dtype=torch.long),
                 torch.tensor(y, dtype=torch.long),
-                torch.tensor(mask, dtype=torch.float32),
+                torch.tensor(lm_mask, dtype=torch.float32),
+                torch.tensor(prompt_index, dtype=torch.long),
+                torch.tensor(label_to_id[intent], dtype=torch.long),
             ))
 
-    def __len__(self) -> int:
+    def __len__(self):
         return len(self.rows)
 
-    def __getitem__(self, index: int):
+    def __getitem__(self, index):
         return self.rows[index]
 
 
-def masked_loss(model, input_ids, targets, mask, label_smoothing):
-    logits = model(input_ids)
-    losses = F.cross_entropy(
+def forward_losses(
+    model,
+    intent_head,
+    input_ids,
+    targets,
+    lm_mask,
+    prompt_index,
+    intent_targets,
+    label_smoothing,
+    intent_loss_weight,
+):
+    hidden = model.forward_hidden(input_ids)
+    logits = model.lm_head(hidden)
+
+    token_losses = F.cross_entropy(
         logits.reshape(-1, logits.size(-1)),
         targets.reshape(-1),
         reduction="none",
         label_smoothing=label_smoothing,
     ).view_as(targets)
-    return (losses * mask).sum() / mask.sum().clamp_min(1.0)
+    lm_loss = (token_losses * lm_mask).sum() / lm_mask.sum().clamp_min(1.0)
+
+    batch_index = torch.arange(hidden.size(0), device=hidden.device)
+    prompt_repr = hidden[batch_index, prompt_index]
+    intent_logits = intent_head(prompt_repr)
+    intent_loss = F.cross_entropy(intent_logits, intent_targets)
+    intent_acc = (
+        intent_logits.argmax(dim=-1) == intent_targets
+    ).float().mean()
+
+    total_loss = lm_loss + intent_loss_weight * intent_loss
+    return total_loss, lm_loss, intent_loss, intent_acc
 
 
 @torch.no_grad()
-def evaluate(model, loader, device, label_smoothing):
+def evaluate(
+    model,
+    intent_head,
+    loader,
+    device,
+    label_smoothing,
+    intent_loss_weight,
+):
     model.eval()
-    total = 0.0
+    intent_head.eval()
+    sums = [0.0, 0.0, 0.0, 0.0]
     batches = 0
-    for input_ids, targets, mask in loader:
+
+    for input_ids, targets, mask, prompt_index, intent_targets in loader:
         input_ids = input_ids.to(device)
         targets = targets.to(device)
         mask = mask.to(device)
-        total += float(
-            masked_loss(
-                model, input_ids, targets, mask, label_smoothing
-            ).item()
+        prompt_index = prompt_index.to(device)
+        intent_targets = intent_targets.to(device)
+
+        values = forward_losses(
+            model,
+            intent_head,
+            input_ids,
+            targets,
+            mask,
+            prompt_index,
+            intent_targets,
+            label_smoothing,
+            intent_loss_weight,
         )
+        for i, value in enumerate(values):
+            sums[i] += float(value.item())
         batches += 1
-    return total / max(1, batches)
+
+    return tuple(value / max(1, batches) for value in sums)
 
 
 def main() -> None:
@@ -261,7 +291,7 @@ def main() -> None:
 
     print()
     print("====================================")
-    print(" LLM_GPU v0.7 BPE Conversational SFT")
+    print(" LLM_GPU v0.7 Augmented Multi-task SFT")
     print("====================================")
     print()
 
@@ -281,28 +311,32 @@ def main() -> None:
         device=device,
     )
 
-    if model.vocab_size != tokenizer.vocab_size:
-        raise ValueError("Tokenizer/model vocabulary mismatch.")
-
     conversation_pairs = parse_dialogues(
         Path(args.data).read_text(encoding="utf-8")
     )
     instruction_pairs = parse_instruction_pairs(
         Path(args.instruction_data).read_text(encoding="utf-8")
     )
-    pairs = deduplicate_pairs(conversation_pairs + instruction_pairs)
+    base_pairs = deduplicate_pairs(conversation_pairs + instruction_pairs)
 
-    train_pairs, val_pairs = stratified_split(
-        pairs,
+    augmented_rows = augment_pairs(
+        base_pairs,
+        variants_per_intent=args.variants_per_intent,
+    )
+    labels = sorted({row[2] for row in augmented_rows})
+    label_to_id = {label: i for i, label in enumerate(labels)}
+
+    train_rows, val_rows = stratified_split(
+        augmented_rows,
         validation_ratio=args.validation_ratio,
         seed=SEED,
     )
 
-    train_set = ConversationDataset(
-        train_pairs, tokenizer, model.context_length
+    train_set = MultiTaskDataset(
+        train_rows, tokenizer, model.context_length, label_to_id
     )
-    val_set = ConversationDataset(
-        val_pairs, tokenizer, model.context_length
+    val_set = MultiTaskDataset(
+        val_rows, tokenizer, model.context_length, label_to_id
     )
 
     train_loader = DataLoader(
@@ -320,71 +354,99 @@ def main() -> None:
         pin_memory=(device.type == "cuda"),
     )
 
+    intent_head = nn.Sequential(
+        nn.Linear(model.d_model, model.d_model),
+        nn.GELU(),
+        nn.Linear(model.d_model, len(labels)),
+    ).to(device)
+
     optimizer = torch.optim.AdamW(
-        model.parameters(),
+        list(model.parameters()) + list(intent_head.parameters()),
         lr=args.learning_rate,
         weight_decay=0.01,
     )
 
-    print("Device            :", device)
+    print("Device             :", device)
     if device.type == "cuda":
-        print("GPU               :", torch.cuda.get_device_name(0))
-    print("Tokenizer         :", "byte-level BPE")
-    print("Vocabulary        :", tokenizer.vocab_size)
-    print("Base loss         :", checkpoint.get("loss"))
-    print("Conversation pairs:", len(conversation_pairs))
-    print("Instruction pairs :", len(instruction_pairs))
-    print("Combined unique   :", len(pairs))
-    print("Train pairs       :", len(train_pairs))
-    print("Validation pairs  :", len(val_pairs))
-    print("Validation split  :", "intent-stratified")
-    print("Context length    :", model.context_length)
-    print("Parameters        :", f"{model.parameter_count:,}")
-    print("Learning rate     :", args.learning_rate)
-    print("Label smoothing   :", args.label_smoothing)
+        print("GPU                :", torch.cuda.get_device_name(0))
+    print("Base loss          :", checkpoint.get("loss"))
+    print("Base unique pairs  :", len(base_pairs))
+    print("Augmented pairs    :", len(augmented_rows))
+    print("Intent classes     :", len(labels))
+    print("Intent labels      :", ", ".join(labels))
+    print("Train rows         :", len(train_rows))
+    print("Validation rows    :", len(val_rows))
+    print("Intent loss weight :", args.intent_loss_weight)
+    print("Label smoothing    :", args.label_smoothing)
+    print("Learning rate      :", args.learning_rate)
     print()
 
     best_val = float("inf")
-    best_state = None
+    best_model_state = None
+    best_head_state = None
     best_epoch = 0
     bad_epochs = 0
 
     for epoch in range(1, args.epochs + 1):
         model.train()
-        total = 0.0
+        intent_head.train()
+        total = lm_total = intent_total = acc_total = 0.0
         batches = 0
         started = time.perf_counter()
 
-        for input_ids, targets, mask in train_loader:
+        for input_ids, targets, mask, prompt_index, intent_targets in train_loader:
             input_ids = input_ids.to(device, non_blocking=True)
             targets = targets.to(device, non_blocking=True)
             mask = mask.to(device, non_blocking=True)
+            prompt_index = prompt_index.to(device, non_blocking=True)
+            intent_targets = intent_targets.to(device, non_blocking=True)
 
             optimizer.zero_grad(set_to_none=True)
-            loss = masked_loss(
+            loss, lm_loss, intent_loss, intent_acc = forward_losses(
                 model,
+                intent_head,
                 input_ids,
                 targets,
                 mask,
+                prompt_index,
+                intent_targets,
                 args.label_smoothing,
+                args.intent_loss_weight,
             )
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            torch.nn.utils.clip_grad_norm_(
+                list(model.parameters()) + list(intent_head.parameters()),
+                1.0,
+            )
             optimizer.step()
+
             total += float(loss.item())
+            lm_total += float(lm_loss.item())
+            intent_total += float(intent_loss.item())
+            acc_total += float(intent_acc.item())
             batches += 1
 
         train_loss = total / max(1, batches)
-        val_loss = evaluate(
-            model, val_loader, device, args.label_smoothing
+        train_lm = lm_total / max(1, batches)
+        train_intent = intent_total / max(1, batches)
+        train_acc = acc_total / max(1, batches)
+
+        val_loss, val_lm, val_intent, val_acc = evaluate(
+            model,
+            intent_head,
+            val_loader,
+            device,
+            args.label_smoothing,
+            args.intent_loss_weight,
         )
         elapsed = time.perf_counter() - started
 
         print(
             f"Epoch {epoch:02d}/{args.epochs} "
-            f"| train {train_loss:.4f} "
-            f"| val {val_loss:.4f} "
-            f"| ppl {math.exp(min(val_loss, 20.0)):.2f} "
+            f"| train={train_loss:.4f} lm={train_lm:.4f} "
+            f"intent={train_intent:.4f} intent_acc={train_acc:.1%} "
+            f"| val={val_loss:.4f} lm={val_lm:.4f} "
+            f"intent={val_intent:.4f} intent_acc={val_acc:.1%} "
             f"| {elapsed:.2f}s"
         )
 
@@ -392,9 +454,13 @@ def main() -> None:
             best_val = val_loss
             best_epoch = epoch
             bad_epochs = 0
-            best_state = {
-                key: value.detach().cpu().clone()
-                for key, value in model.state_dict().items()
+            best_model_state = {
+                k: v.detach().cpu().clone()
+                for k, v in model.state_dict().items()
+            }
+            best_head_state = {
+                k: v.detach().cpu().clone()
+                for k, v in intent_head.state_dict().items()
             }
         else:
             bad_epochs += 1
@@ -402,23 +468,43 @@ def main() -> None:
                 print("Early stopping.")
                 break
 
-    if best_state is None:
-        raise RuntimeError("No valid SFT checkpoint produced.")
+    if best_model_state is None or best_head_state is None:
+        raise RuntimeError("No valid multi-task checkpoint produced.")
 
-    model.load_state_dict(best_state)
+    model.load_state_dict(best_model_state)
     model.to(device)
+    intent_head.load_state_dict(best_head_state)
+
     model.save_checkpoint(
         args.output,
-        optimizer=optimizer,
+        optimizer=None,
         epoch=best_epoch,
         loss=best_val,
     )
 
+    Path(args.intent_head_output).parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "labels": labels,
+            "state_dict": intent_head.state_dict(),
+            "d_model": model.d_model,
+            "epoch": best_epoch,
+            "loss": best_val,
+            "intent_loss_weight": args.intent_loss_weight,
+        },
+        args.intent_head_output,
+    )
+
     print()
-    print("SFT completed.")
-    print("Best epoch       :", best_epoch)
-    print("Best val loss    :", f"{best_val:.6f}")
-    print("Model saved      :", args.output)
+    print("Multi-task SFT completed.")
+    print("Best epoch        :", best_epoch)
+    print("Best val total    :", f"{best_val:.6f}")
+    print("Chat model saved  :", args.output)
+    print("Intent head saved :", args.intent_head_output)
+    print()
+    print("Next:")
+    print("  python evaluate_chat.py")
+    print("  python evaluate_generalization_v07.py")
 
 
 if __name__ == "__main__":
