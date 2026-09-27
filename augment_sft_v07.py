@@ -907,6 +907,107 @@ PROTECTED_BOUNDARY_REPLAY_ROWS: Sequence[Tuple[str, str, str]] = [
 ]
 
 
+# v0.9 Boundary v4: Balanced Control Replay.
+# Stable capabilities use a lower replay strength, while short/repeat use a
+# stronger replay strength to prevent the v3 collapse of repeat.
+BALANCED_STABLE_REPLAY_ROWS: Sequence[Tuple[str, str, str]] = [
+    # Python protection.
+    (
+        "読みやすく幅広い用途で使える汎用プログラミング言語は何ですか。",
+        "Pythonです。Pythonは読みやすい文法を持つ汎用プログラミング言語です。",
+        "tech_python",
+    ),
+    (
+        "CUDAと区別して、一般的なプログラムを書くための言語を答えてください。",
+        "Pythonです。Pythonはプログラミング言語で、CUDAはGPU計算技術です。",
+        "tech_python",
+    ),
+
+    # GPU/CPU relation protection.
+    (
+        "CPUとGPUのうち、並列処理を得意とする側を答えてください。",
+        "GPUです。GPUは並列計算を得意とし、CPUは汎用処理や制御を担当します。",
+        "tech_gpu",
+    ),
+    (
+        "CPUとGPUのうち、汎用命令や制御を担当する側を答えてください。",
+        "CPUです。CPUは汎用処理や制御を担当し、GPUは並列計算を得意とします。",
+        "tech_cpu",
+    ),
+
+    # topic protection.
+    (
+        "会話は終えずに、別の話題へ切り替えてください。",
+        "はい。会話を続けたまま別の話題へ移りましょう。",
+        "control_topic",
+    ),
+    (
+        "続きは後日にせず、今すぐ別のテーマへ移りたいです。",
+        "いいですよ。今すぐ別のテーマに切り替えましょう。",
+        "control_topic",
+    ),
+
+    # end protection: immediate stop and continue-later.
+    (
+        "今日はここで会話を終了しましょう。",
+        "お疲れさまでした。また必要なときにお話ししましょう。",
+        "control_end",
+    ),
+    (
+        "残りは次の機会にして、今日はここまでにしましょう。",
+        "はい。また次回、続きから始めましょう。",
+        "control_end",
+    ),
+]
+
+
+BALANCED_CONTROL_REPLAY_ROWS: Sequence[Tuple[str, str, str]] = [
+    # short: length control only.
+    (
+        "詳しい説明は不要です。短く答えてください。",
+        "はい。要点だけ短く答えます。",
+        "control_short",
+    ),
+    (
+        "内容を変えず、返答だけ簡潔にしてください。",
+        "はい。同じ内容のまま簡潔に答えます。",
+        "control_short",
+    ),
+    (
+        "説明し直さなくてよいので、結論だけ短くしてください。",
+        "はい。結論だけ簡潔に答えます。",
+        "control_short",
+    ),
+    (
+        "長い返答は避けて、要点だけにしてください。",
+        "はい。要点に絞って短く答えます。",
+        "control_short",
+    ),
+
+    # repeat: comprehension/rephrasing control only.
+    (
+        "説明が分からなかったので、別の言葉でもう一度説明してください。",
+        "もちろんです。分かりやすい言葉に言い換えてもう一度説明します。",
+        "control_repeat",
+    ),
+    (
+        "要約ではなく、理解しやすい表現に言い換えて説明してください。",
+        "はい。簡単な言葉に言い換えて説明します。",
+        "control_repeat",
+    ),
+    (
+        "短くする必要はありません。説明を別の表現でやり直してください。",
+        "もちろんです。別の表現でもう一度説明します。",
+        "control_repeat",
+    ),
+    (
+        "今の説明では分かりにくいので、内容を言い換えてください。",
+        "はい。分かりやすい表現に言い換えて説明します。",
+        "control_repeat",
+    ),
+]
+
+
 RELATION_AUGMENT_ROWS: Sequence[Tuple[str, str]] = [
     (
         "CPUとGPUの役割の違いを説明してください。",
@@ -957,6 +1058,7 @@ def augment_pairs(
     include_targeted_boundary: bool = False,
     include_targeted_boundary_v2: bool = False,
     include_protected_boundary_replay: bool = False,
+    include_balanced_control_replay: bool = False,
 ) -> List[LabeledPair]:
     """Return deduplicated base + deterministic synthetic multi-label rows."""
     output: List[LabeledPair] = []
@@ -1001,6 +1103,27 @@ def augment_pairs(
             tags = set(classify_tags(prompt))
             tags.add(label)
             tags.add("protected_boundary_replay")
+            output.append((key[0], key[1], tuple(sorted(tags))))
+
+    if include_balanced_control_replay:
+        for prompt, answer, label in BALANCED_STABLE_REPLAY_ROWS:
+            key = (prompt.strip(), answer.strip())
+            if key in seen:
+                continue
+            seen.add(key)
+            tags = set(classify_tags(prompt))
+            tags.add(label)
+            tags.add("balanced_stable_replay")
+            output.append((key[0], key[1], tuple(sorted(tags))))
+
+        for prompt, answer, label in BALANCED_CONTROL_REPLAY_ROWS:
+            key = (prompt.strip(), answer.strip())
+            if key in seen:
+                continue
+            seen.add(key)
+            tags = set(classify_tags(prompt))
+            tags.add(label)
+            tags.add("balanced_control_replay")
             output.append((key[0], key[1], tuple(sorted(tags))))
 
     for prompt, answer in RELATION_AUGMENT_ROWS:
