@@ -64,9 +64,13 @@ def parse_args() -> argparse.Namespace:
 
 
 def lr_tag(value: float) -> str:
-    # Stable filename tag: 2e-06 -> 2e-6, 1e-05 -> 1e-5
-    text = f"{value:.0e}"
-    return text.replace("e-0", "e-").replace("e+0", "e+")
+    """Stable collision-free filename tag for coarse and local LR sweeps."""
+    text = f"{value:.8g}".lower()
+    if "e" in text:
+        mantissa, exponent = text.split("e", 1)
+        text = f"{mantissa}e{int(exponent)}"
+    # Windows-safe and visually reversible: 7.5e-6 -> 7p5e-6.
+    return text.replace(".", "p").replace("+", "")
 
 
 def run_command(
