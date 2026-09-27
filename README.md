@@ -5910,3 +5910,54 @@ Name-request G05
 
 Therefore, subsequent experiments should start from v0.12.2 unless a later
 experiment explicitly establishes a better held-out result.
+### v0.12.2 Semantic Neighborhood Diagnostic
+
+After v0.12.3 failed to generalize to G05, the next step is diagnostic only.
+No training is performed and v0.12.2 remains the current-best checkpoint.
+
+The diagnostic measures where both G05 variants sit in the frozen 345-d
+semantic + lexical condition space relative to the CPU/GPU local prompts that
+were used by the failed v0.12.3 experiment.
+
+Measurements:
+
+```text
+cosine similarity
+Euclidean distance
+CPU centroid similarity/distance
+GPU centroid similarity/distance
+nearest CPU row
+nearest GPU row
+full CPU/GPU nearest-neighbor ordering
+v0.12.2 entity gate value
+v0.12.2 CPU-GPU final-logit margin for every reference row
+```
+
+The failed v0.12.3 checkpoint is not loaded. Its prompt set is used only as a
+collection of reference points in the frozen v0.12.2 representation space.
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_semantic_neighborhood_diagnostic_v0122.py
+```
+
+Log:
+
+```text
+results/semantic_neighborhood_v0122/diagnostic.log
+```
+
+Interpretation target:
+
+```text
+If G05 is closer to GPU local rows than expected:
+  -> the human-designed CPU neighborhood does not match the learned space.
+
+If G05 is close to CPU local rows but their CPU-GPU logit behavior differs:
+  -> the representation is locally similar but the output map is non-smooth
+     or directionally inconsistent.
+```
