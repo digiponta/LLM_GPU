@@ -7460,9 +7460,10 @@ Nontechnical regressions:
 topic / repeat / end / compare rows were pulled toward technical entities.
 ```
 
-v0.10.5 introduces an explicit supervised alignment gate.
+v0.10.5 introduces an explicit supervised alignment gate based on the
+augmentation row tags.
 
-Alignment is active only when the training-row intent is one of:
+Alignment is active when a row contains at least one technical tag:
 
 ```text
 tech_gpu
@@ -7473,8 +7474,25 @@ tech_cuda
 tech_python
 ```
 
-For all other rows, entity/global/continuation alignment losses are exactly
-zero. Normal LM loss and semantic-consistency loss remain active.
+and does not contain a blocking control/nontechnical tag:
+
+```text
+control_short
+control_topic
+control_repeat
+control_end
+debug_error
+research_compare
+greeting
+fatigue
+thanks
+capital
+```
+
+This prevents prompts such as "stop the GPU topic" from being forced toward
+a GPU entity merely because the word GPU appears. For gated-off rows,
+entity/global/continuation alignment losses are exactly zero. Normal LM loss
+and semantic-consistency loss remain active.
 
 Conceptually:
 
