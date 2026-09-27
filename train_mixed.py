@@ -1,22 +1,20 @@
 # train_mixed.py
 #
-# LLM_GPU v0.6 mixed pretraining.
+# LLM_GPU v0.6 curriculum mixed pretraining.
 #
-# Default mixture:
-#   70% general Japanese
-#   20% conversational text
-#   10% instruction / QA
+# Phase A (first 80% of samples):
+#   90% general Japanese / 7% conversation / 3% instruction
+# Phase B (last 20% of samples):
+#   70% general Japanese / 20% conversation / 10% instruction
 #
-# The model is trained from scratch with:
-#   d_model=128, 4 layers, 4 heads, FFN=512, context=256,
-#   learned positional embeddings.
+# The curriculum reduces repeated exposure to the much smaller dialogue and
+# instruction corpora before the base Japanese language model is stable.
 
 from __future__ import annotations
 
 import argparse
-import math
 from pathlib import Path
-from typing import List, Sequence, Tuple
+from typing import Dict, Sequence, Tuple
 
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -38,6 +36,17 @@ HIDDEN_DIM = 512
 SEED = 42
 REQUIRE_CUDA = True
 
+WARMUP_WEIGHTS = {
+    "general": 90,
+    "conversation": 7,
+    "instruction": 3,
+}
+TARGET_WEIGHTS = {
+    "general": 70,
+    "conversation": 20,
+    "instruction": 10,
+}
+
 
 def find_data_file(filename: str) -> Path:
     candidates = [
@@ -58,75 +67,89 @@ def clean_comment_lines(text: str) -> str:
     ).strip()
 
 
-class MixedTokenWindowDataset(Dataset):
-    """Memory-light deterministic 70/20/10 source mixer."""
+class CurriculumMixedDataset(Dataset):
+    """Deterministic two-phase source mixer without a large index table."""
 
     def __init__(
         self,
-        sources: Sequence[Tuple[str, Sequence[int], int]],
+        sources: Sequence[Tuple[str, Sequence[int]]],
         context_length: int,
         sample_count: int,
+        warmup_ratio: float = 0.80,
         seed: int = 42,
     ):
-        self.context_length = context_length
-        self.sample_count = int(sample_count)
-        self.seed = int(seed)
-        self.sources = []
-
-        if self.sample_count <= 0:
+        if sample_count <= 0:
             raise ValueError("sample_count must be > 0.")
+        if not 0.0 <= warmup_ratio <= 1.0:
+            raise ValueError("warmup_ratio must be between 0 and 1.")
 
-        total_weight = sum(weight for _, _, weight in sources)
-        if total_weight <= 0:
-            raise ValueError("Source weights must sum to > 0.")
+        self.context_length = int(context_length)
+        self.sample_count = int(sample_count)
+        self.warmup_count = int(round(sample_count * warmup_ratio))
+        self.seed = int(seed)
+        self.sources: Dict[str, Dict[str, object]] = {}
 
-        cumulative = 0
-        for name, token_ids, weight in sources:
+        for name, token_ids in sources:
             ids = list(token_ids)
-            positions = len(ids) - context_length
+            positions = len(ids) - self.context_length
             if positions <= 0:
                 raise ValueError(
                     f"Source {name!r} is too short for context "
-                    f"{context_length}: {len(ids)} tokens"
+                    f"{self.context_length}: {len(ids)} tokens"
                 )
-            cumulative += weight
-            self.sources.append({
-                "name": name,
+            self.sources[name] = {
                 "ids": ids,
                 "positions": positions,
-                "weight": weight,
-                "cumulative": cumulative,
-            })
+            }
 
-        self.total_weight = total_weight
+        for required in ("general", "conversation", "instruction"):
+            if required not in self.sources:
+                raise ValueError(f"Missing source: {required}")
 
     def __len__(self) -> int:
         return self.sample_count
 
-    def _source_for_index(self, index: int):
-        bucket = index % self.total_weight
-        for source in self.sources:
-            if bucket < source["cumulative"]:
-                return source
-        return self.sources[-1]
+    @staticmethod
+    def _pick_name(index: int, weights: Dict[str, int]) -> str:
+        total = sum(weights.values())
+        bucket = index % total
+        cumulative = 0
+        for name, weight in weights.items():
+            cumulative += weight
+            if bucket < cumulative:
+                return name
+        return next(reversed(weights))
 
     def __getitem__(self, index: int):
         if index < 0 or index >= self.sample_count:
             raise IndexError("dataset index out of range")
 
-        source = self._source_for_index(index)
-        positions = source["positions"]
+        if index < self.warmup_count:
+            weights = WARMUP_WEIGHTS
+            phase_offset = 0
+        else:
+            weights = TARGET_WEIGHTS
+            phase_offset = self.warmup_count
 
-        # Deterministic pseudo-random source-local starting position.
+        name = self._pick_name(index - phase_offset, weights)
+        source = self.sources[name]
+        ids = source["ids"]
+        positions = int(source["positions"])
+
+        # Source-local pseudo-random traversal. Different constants make the
+        # windows decorrelate without allocating a shuffled index array.
+        salt = {
+            "general": 101,
+            "conversation": 211,
+            "instruction": 307,
+        }[name]
         start = (
             self.seed * 104729
             + index * 2654435761
-            + len(source["name"]) * 7919
+            + salt * 7919
         ) % positions
 
-        ids = source["ids"]
         end = start + self.context_length
-
         x = torch.tensor(ids[start:end], dtype=torch.long)
         y = torch.tensor(ids[start + 1:end + 1], dtype=torch.long)
         return x, y
@@ -134,12 +157,13 @@ class MixedTokenWindowDataset(Dataset):
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="LLM_GPU v0.6 mixed pretraining."
+        description="LLM_GPU v0.6 curriculum mixed pretraining."
     )
     parser.add_argument("--samples", type=int, default=500_000)
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
+    parser.add_argument("--warmup-ratio", type=float, default=0.80)
     return parser.parse_args()
 
 
@@ -147,9 +171,7 @@ def select_device() -> torch.device:
     if torch.cuda.is_available():
         return torch.device("cuda")
     if REQUIRE_CUDA:
-        raise RuntimeError(
-            "CUDA is not available. Run python check_gpu.py first."
-        )
+        raise RuntimeError("CUDA is not available. Run python check_gpu.py.")
     return torch.device("cpu")
 
 
@@ -159,7 +181,7 @@ def main() -> None:
 
     print()
     print("====================================")
-    print(" LLM_GPU v0.6 Mixed Pretraining")
+    print(" LLM_GPU v0.6 Curriculum Pretraining")
     print("====================================")
     print()
 
@@ -191,7 +213,7 @@ def main() -> None:
     print("Instruction corpus  :", f"{len(instruction_text):,}", "characters")
 
     print()
-    print("Building v0.6 tokenizer from all three sources...")
+    print("Building tokenizer from all v0.6 sources...")
     tokenizer = Tokenizer()
     tokenizer.fit_texts([
         general_text,
@@ -201,9 +223,7 @@ def main() -> None:
     Path("model").mkdir(exist_ok=True)
     tokenizer.save(TOKENIZER_FILE)
 
-    general_ids = tokenizer.encode(
-        general_text, add_bos=True, add_eos=True
-    )
+    general_ids = tokenizer.encode(general_text, add_bos=True, add_eos=True)
     conversation_ids = tokenizer.encode(
         conversation_text, add_bos=True, add_eos=True
     )
@@ -211,14 +231,15 @@ def main() -> None:
         instruction_text, add_bos=True, add_eos=True
     )
 
-    dataset = MixedTokenWindowDataset(
+    dataset = CurriculumMixedDataset(
         sources=[
-            ("general", general_ids, 7),
-            ("conversation", conversation_ids, 2),
-            ("instruction", instruction_ids, 1),
+            ("general", general_ids),
+            ("conversation", conversation_ids),
+            ("instruction", instruction_ids),
         ],
         context_length=CONTEXT_LENGTH,
         sample_count=args.samples,
+        warmup_ratio=args.warmup_ratio,
         seed=SEED,
     )
 
@@ -242,9 +263,7 @@ def main() -> None:
         use_position_embedding=True,
     ).to(device)
 
-    presented_tokens = (
-        args.samples * CONTEXT_LENGTH * args.epochs
-    )
+    presented_tokens = args.samples * CONTEXT_LENGTH * args.epochs
 
     print()
     print("Device           :", device)
@@ -257,7 +276,15 @@ def main() -> None:
     print("Layers           :", NUM_LAYERS)
     print("Attention heads  :", NUM_HEADS)
     print("FFN dimension    :", HIDDEN_DIM)
-    print("Mixture          : 70% general / 20% conversation / 10% instruction")
+    print(
+        "Phase A mixture  :",
+        "90% general / 7% conversation / 3% instruction",
+    )
+    print(
+        "Phase B mixture  :",
+        "70% general / 20% conversation / 10% instruction",
+    )
+    print("Phase A fraction :", f"{args.warmup_ratio:.0%}")
     print("Samples/epoch    :", f"{args.samples:,}")
     print("Epochs           :", args.epochs)
     print("Batch size       :", args.batch_size)
@@ -282,7 +309,7 @@ def main() -> None:
     )
 
     print()
-    print("Mixed pretraining completed.")
+    print("Curriculum pretraining completed.")
     print("Loss history     :", history)
     print("Model saved      :", MODEL_FILE)
     print()
