@@ -1,9 +1,9 @@
-# train_semantic_aware_lm_head_v010.py
+# train_semantic_output_alignment_v0103.py
 #
 # v0.10.3 Semantic-to-Output Alignment
 #
-# Controlled difference from v0.9 Semantic Consistency:
-#   LM head is unfrozen and trained at a very low learning rate.
+# Controlled extension of v0.10.2 best configuration:
+#   add semantic-concept -> output-entity logit alignment.
 
 from __future__ import annotations
 
@@ -132,7 +132,7 @@ def parse_args():
     p.add_argument("--projection-lr", type=float, default=1e-3)
     p.add_argument("--block-lr", type=float, default=1e-5)
     p.add_argument("--consistency-lr", type=float, default=1e-3)
-    p.add_argument("--lm-head-lr", type=float, default=1e-6)
+    p.add_argument("--lm-head-lr", type=float, default=3e-6)
     p.add_argument("--consistency-weight", type=float, default=0.50)
     p.add_argument("--alignment-weight", type=float, default=0.10)
     p.add_argument("--alignment-margin", type=float, default=0.75)
