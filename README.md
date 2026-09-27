@@ -5787,3 +5787,83 @@ G10 -> Python
 G27 -> GPU
 G28 -> CPU
 ```
+### v0.9.1 v0.12.3: CPU-GPU Local Margin Refinement
+
+v0.12.2 successfully moved G05 in the correct direction:
+
+```text
+Original G05 CPU-GPU final margin: -1.6826
+Name-request G05 final margin    : -1.1942
+```
+
+but CPU still did not outrank GPU.
+
+v0.12.3 therefore starts from the trained v0.12.2 checkpoint and performs a
+local refinement only on CPU/GPU-neighborhood prompts.
+
+Direct final-logit objective:
+
+```text
+CPU neighborhood:
+  final_logit(CPU) >= final_logit(GPU) + 1.0
+
+GPU neighborhood:
+  final_logit(GPU) >= final_logit(CPU) + 1.0
+```
+
+The exact G05 benchmark prompts remain excluded from training.
+
+Training policy:
+
+```text
+v0.12.2 adapter       : initialized from checkpoint, trainable
+v0.12.2 entity gate   : frozen
+v0.11 generation      : frozen
+v0.8 semantic path    : frozen
+v0.10.2 name binding  : frozen
+learning rate         : 1e-4
+target margin         : 1.0
+classification weight : 0.25
+preservation weight   : 0.20
+```
+
+To limit regression, replay prompts covering LLM, Transformer, CUDA, Python
+and non-entity/control cases preserve the v0.12.2 effective direct-bias
+outputs with an MSE preservation term.
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_cpu_gpu_local_margin_v0123.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v0.9.1-cpu-gpu-local-margin-v0123.pt
+```
+
+Logs:
+
+```text
+results/cpu_gpu_local_margin_v0123/train.log
+results/cpu_gpu_local_margin_v0123/eval.log
+```
+
+The evaluator compares v0.12.2 and v0.12.3 G05 final CPU-GPU margins directly
+and reruns the full fixed 30-case benchmark.
+
+Primary targets:
+
+```text
+Original G05: CPU-GPU final margin > 0
+Name-request G05: CPU-GPU final margin > 0
+G05 generation -> CPU
+G27 -> GPU
+G28 -> CPU
+G08/G09/G10 retained
+non-entity behavior retained
+```
