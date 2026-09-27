@@ -21,7 +21,10 @@ from cpu_name_binding_v0102 import load_cpu_name_binding_checkpoint
 from semantic_encoder_adapter_v08 import SEMANTIC_HIERARCHY_LABELS
 from semantic_encoder_adapter_v01 import CONCEPT_LABELS, ATTRIBUTE_LABELS
 from semantic_generation_integration_v08 import load_frozen_semantic_path_v08
-from semantic_generation_integration_v09 import infer_semantic_condition
+from semantic_generation_integration_v09 import (
+    forward_semantic_conditioned,
+    infer_semantic_condition,
+)
 from semantic_lexical_logit_alignment_v012 import (
     SemanticLexicalLogitAdapter,
     load_frozen_v011,
@@ -70,7 +73,7 @@ def parse_args():
     return p.parse_args()
 
 
-def condition_vector(
+def condition_parts(
     semantic_model,
     semantic_adapter,
     semantic_heads,
@@ -89,7 +92,7 @@ def condition_vector(
             prompt_index,
         )
         lexical_identity = name_binding(adapted)
-        return torch.cat(
+        condition = torch.cat(
             [
                 adapted,
                 concept_prob,
@@ -99,6 +102,14 @@ def condition_vector(
             ],
             dim=-1,
         )
+    return (
+        condition,
+        adapted,
+        concept_prob,
+        attribute_prob,
+        hierarchy_prob,
+        lexical_identity,
+    )
 
 
 def first_answer_targets(targets, lm_mask):
@@ -114,6 +125,8 @@ def first_answer_targets(targets, lm_mask):
 
 def batch_loss(
     adapter,
+    generation_model,
+    v011_projection,
     semantic_model,
     semantic_adapter,
     semantic_heads,
@@ -125,7 +138,14 @@ def batch_loss(
     prompt_index,
     l2_weight,
 ):
-    condition = condition_vector(
+    (
+        condition,
+        adapted,
+        concept_prob,
+        attribute_prob,
+        hierarchy_prob,
+        lexical_identity,
+    ) = condition_parts(
         semantic_model,
         semantic_adapter,
         semantic_heads,
@@ -134,9 +154,35 @@ def batch_loss(
         input_ids,
         prompt_index,
     )
-    target = first_answer_targets(targets, lm_mask)
+
+    with torch.no_grad():
+        semantic_bias = v011_projection(
+            adapted,
+            concept_prob,
+            attribute_prob,
+            hierarchy_prob,
+            lexical_identity,
+        )
+        hidden = forward_semantic_conditioned(
+            generation_model,
+            input_ids,
+            semantic_bias,
+            v011_projection.inject_after,
+        )
+        base_logits = generation_model.lm_head(hidden)
+
+    active = lm_mask > 0
+    first = active & (active.cumsum(dim=1) == 1)
+    if not torch.all(first.sum(dim=1) == 1):
+        raise RuntimeError("Every row must contain exactly one first answer token.")
+    positions = first.float().argmax(dim=1)
+    batch = torch.arange(targets.size(0), device=targets.device)
+    target = targets[batch, positions]
+    frozen_first_logits = base_logits[batch, positions, :]
+
     bias = adapter(condition)
-    ce = F.cross_entropy(bias, target)
+    combined_logits = frozen_first_logits + bias
+    ce = F.cross_entropy(combined_logits, target)
     reg = bias.pow(2).mean()
     total = ce + l2_weight * reg
     return total, ce, reg
@@ -145,6 +191,8 @@ def batch_loss(
 @torch.no_grad()
 def evaluate(
     adapter,
+    generation_model,
+    v011_projection,
     semantic_model,
     semantic_adapter,
     semantic_heads,
@@ -164,6 +212,8 @@ def evaluate(
         prompt_index = prompt_index.to(device)
         loss, ce, reg = batch_loss(
             adapter,
+            generation_model,
+            v011_projection,
             semantic_model,
             semantic_adapter,
             semantic_heads,
@@ -313,6 +363,7 @@ def main():
     print("Logit adapter          :", f"{expected_dim} -> {args.rank} -> {generation_model.vocab_size}")
     print("Beta                   :", args.beta)
     print("Application            : first assistant token only")
+    print("Training logits        : frozen v0.11 logits + direct bias")
     print("LM Head                : frozen")
     print("Train rows             :", len(train_rows))
     print("Validation rows        :", len(val_rows))
@@ -337,6 +388,8 @@ def main():
             optimizer.zero_grad(set_to_none=True)
             loss, ce, reg = batch_loss(
                 adapter,
+                generation_model,
+                v011_projection,
                 semantic_model,
                 semantic_adapter,
                 semantic_heads,
@@ -360,6 +413,8 @@ def main():
         n = max(1, batches)
         val, val_ce, val_reg = evaluate(
             adapter,
+            generation_model,
+            v011_projection,
             semantic_model,
             semantic_adapter,
             semantic_heads,
