@@ -6655,3 +6655,104 @@ If learned semantic tags remain ambiguous:
   -> the frozen prompt hidden representation itself is insufficient and deeper
      semantic encoder adaptation is required.
 ```
+### v0.9.6 Semantic Encoder Adaptation
+
+v0.9.5 showed that adding a supervised bottleneck after the frozen v0.8
+prompt representation did not improve held-out semantic generalization.
+v0.9.6 therefore adapts the late Transformer representation itself.
+
+Architecture:
+
+```text
+Embedding + Blocks 1-3        frozen
+             |
+             v
+Blocks 4-6                  trainable
+             |
+             v
+FinalNorm                   trainable
+             |\
+             | +--> Semantic tag head (24)  trainable
+             |
+             +--> frozen LM head -> generation
+```
+
+The semantic tag head supervises the adapted prompt hidden state directly.
+The LM head stays frozen so improvements must come from moving the hidden
+representation into a better semantic/generation region rather than changing
+the output vocabulary geometry.
+
+Exact prompts from the fixed 30-case benchmark are removed from the augmented
+training rows before the train/validation split. This includes exact G05.
+
+Default optimization:
+
+```text
+Blocks 4-6 + FinalNorm LR : 3e-6
+Semantic-head LR          : 3e-4
+Semantic loss weight      : 0.20
+Technical repeat          : 2
+Replay repeat             : 2
+```
+
+New checkpoint:
+
+```text
+model/model-gpu-v0.9.6-semantic-encoder-adapted.pt
+```
+
+New files:
+
+```text
+semantic_encoder_adaptation_v096.py
+train_semantic_encoder_adaptation_v096.py
+evaluate_semantic_encoder_adaptation_v096.py
+run_semantic_encoder_adaptation_v096.py
+```
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_semantic_encoder_adaptation_v096.py
+```
+
+The evaluator tests the adapted language model directly, without the v0.9
+intent projection/FiLM path. It reports the fixed 30-case benchmark plus:
+
+```text
+CPU direct
+GPU direct
+CPU/GPU contrast
+Original G05
+G05 wording without the question ending
+Name-request G05
+CPU/GPU paraphrases
+Transformer
+Python
+Error
+```
+
+It also prints semantic-head probabilities from the adapted hidden state.
+
+Log:
+
+```text
+results/semantic_encoder_adaptation_v096/run.log
+```
+
+Interpretation:
+
+```text
+If G05 semantic probability moves to tech_cpu and direct generation becomes CPU:
+  -> the frozen v0.8 late representation was the main bottleneck.
+
+If semantic probability improves but generation remains GPU-like:
+  -> hidden semantics improved, but the frozen LM-head/base output prior still dominates.
+
+If both remain GPU-like:
+  -> Blocks 4-6 adaptation at this learning rate/supervision is insufficient;
+     a stronger encoder adaptation or additional contrastive semantic objective is needed.
+```
