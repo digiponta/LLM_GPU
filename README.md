@@ -5265,3 +5265,83 @@ The sweep intentionally does not choose a winner automatically. The decision
 should consider validation loss, 30-case semantic/strict scores, and hard-case
 behavior together.
 
+### v0.9.1 v0.10.2: CPU Name-Meaning Binding
+
+This experiment separates CPU lexical identity from functional semantics.
+
+Functional semantics already learned:
+
+```text
+CPU
+  -> general-purpose
+  -> control-oriented
+  -> heterogeneous instruction processing
+```
+
+v0.10.2 adds direct cross-lingual name binding:
+
+```text
+CPU
+  <-> Central Processing Unit
+  <-> 中央処理装置
+  <-> 中央演算処理装置
+```
+
+and component-level correspondences:
+
+```text
+Central    <-> 中央 / 中心
+Processing <-> 処理 / 演算処理
+Unit       <-> 装置
+```
+
+The exact G05 development prompt is not used for training.
+
+Architecture:
+
+```text
+v0.8 frozen semantic representation (256)
+  -> LayerNorm
+  -> Linear(256 -> 64)
+  -> L2 normalization
+  -> CPU name-binding space
+```
+
+Training pulls English/Japanese CPU names and paraphrases together while
+separating them from GPU / Graphics Processing Unit distractors.
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_cpu_name_binding_v0102.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v0.9.1-cpu-name-binding-v0102.pt
+```
+
+Logs:
+
+```text
+results/cpu_name_binding_v0102/train.log
+results/cpu_name_binding_v0102/eval.log
+```
+
+Primary gate:
+
+```text
+Central Processing Unit ~= 中央処理装置
+Central Processing Unit ~= 中央演算処理装置
+Central / Processing / Unit Japanese mappings -> CPU
+exact G05 holdout -> CPU name centroid
+```
+
+Generation is intentionally untouched in this experiment. If the name-binding
+gate passes, the next controlled step is to inject this lexical CPU identity
+signal into generation/logit alignment.
+
