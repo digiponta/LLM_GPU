@@ -6407,3 +6407,80 @@ Log:
 ```text
 results/implicit_cpu_intent_v092/run.log
 ```
+### v0.9.3 Intent-Projection Realignment
+
+After v0.9.2, the corrected intent head changes the 24-dimensional intent
+probability distribution. The older v0.9.1 projection was trained against
+the original v0.8 intent-head distribution, so technical generation can become
+misaligned even when intent probabilities move in the correct direction.
+
+This experiment realigns the projection:
+
+```text
+v0.8 pairwise-best LM       frozen
+v0.9.2 corrected Intent Head frozen
+v0.9.3 Soft-Intent Projection trainable
+```
+
+The existing `train_sft_v09.py` is reused with the corrected v0.9.2 head.
+The old projection is preserved.
+
+New checkpoint:
+
+```text
+model/model-gpu-v0.9.3-soft-intent-realigned.pt
+```
+
+New files:
+
+```text
+evaluate_intent_projection_realignment_v093.py
+run_intent_projection_realignment_v093.py
+```
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_intent_projection_realignment_v093.py
+```
+
+The evaluation uses the same corrected v0.9.2 intent head with both:
+
+```text
+OLD: model/model-gpu-v0.9.1-soft-intent-cpu-definition.pt
+NEW: model/model-gpu-v0.9.3-soft-intent-realigned.pt
+```
+
+and compares deterministic generation on:
+
+```text
+CPU direct
+GPU direct
+CPU/GPU contrast
+Original G05
+Name-request G05
+implicit CPU paraphrase
+implicit GPU paraphrase
+debug/error replay
+Transformer replay
+Python replay
+```
+
+Log:
+
+```text
+results/intent_projection_realignment_v093/run.log
+```
+
+Interpretation:
+
+```text
+If CPU/GPU paraphrase generation recovers under the NEW projection:
+  -> the v0.9.2 head / v0.9.1 projection mismatch was real.
+
+If G05 intent remains GPU/error-dominant and generation remains wrong:
+  -> further intent-head boundary work is still required after realignment.
+```
