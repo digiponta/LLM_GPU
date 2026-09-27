@@ -1,6 +1,9 @@
 # chat.py
 #
 # Interactive short-dialogue interface for LLM_GPU v0.5.
+# Generation is intentionally conservative for the very small model:
+# low temperature, small top-k, response-only repetition penalty, and
+# immediate stop on newline/EOS.
 
 from __future__ import annotations
 
@@ -10,6 +13,7 @@ import time
 from typing import List, Tuple
 
 import torch
+import torch.nn.functional as F
 
 from model import LanguageModel
 from tokenizer import Tokenizer
@@ -20,7 +24,6 @@ DEFAULT_MODEL = "model/model-gpu-v0.5-chat.pt"
 
 USER_PREFIX = "人: "
 AI_PREFIX = "AI: "
-STOP_MARKERS = ("\n人:", "\nAI:")
 
 
 def parse_args() -> argparse.Namespace:
@@ -29,15 +32,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--tokenizer", default=DEFAULT_TOKENIZER)
     parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--max-new-tokens", type=int, default=80)
-    parser.add_argument("--temperature", type=float, default=0.7)
-    parser.add_argument("--top-k", type=int, default=30)
-    parser.add_argument("--repetition-penalty", type=float, default=1.12)
+    parser.add_argument("--max-new-tokens", type=int, default=48)
+    parser.add_argument("--temperature", type=float, default=0.35)
+    parser.add_argument("--top-k", type=int, default=10)
+    parser.add_argument("--repetition-penalty", type=float, default=1.05)
     parser.add_argument(
         "--history-turns",
         type=int,
-        default=2,
-        help="Number of previous user/AI turns kept before context truncation.",
+        default=1,
+        help="Previous turns included before the current user prompt.",
     )
     return parser.parse_args()
 
@@ -48,18 +51,13 @@ def build_prompt(
     history_turns: int,
 ) -> str:
     chunks = []
-    for old_user, old_ai in history[-max(0, history_turns):]:
-        chunks.append(f"{USER_PREFIX}{old_user}\n{AI_PREFIX}{old_ai}\n")
+    if history_turns > 0:
+        for old_user, old_ai in history[-history_turns:]:
+            chunks.append(
+                f"{USER_PREFIX}{old_user}\n{AI_PREFIX}{old_ai}\n"
+            )
     chunks.append(f"{USER_PREFIX}{user_text}\n{AI_PREFIX}")
     return "".join(chunks)
-
-
-def clean_reply(text: str) -> str:
-    reply = text
-    for marker in STOP_MARKERS:
-        if marker in reply:
-            reply = reply.split(marker, 1)[0]
-    return reply.strip()
 
 
 @torch.no_grad()
@@ -67,27 +65,63 @@ def generate_reply(
     model: LanguageModel,
     tokenizer: Tokenizer,
     prompt: str,
-    max_new_tokens: int = 80,
-    temperature: float = 0.7,
-    top_k: int = 30,
-    repetition_penalty: float = 1.12,
+    max_new_tokens: int = 48,
+    temperature: float = 0.35,
+    top_k: int = 10,
+    repetition_penalty: float = 1.05,
 ) -> Tuple[str, int]:
-    input_ids = tokenizer.encode(prompt, add_bos=True)
+    prompt_ids = tokenizer.encode(prompt, add_bos=True)
+    generated = list(prompt_ids)
+    response_ids: List[int] = []
 
-    output_ids = model.generate(
-        input_ids,
-        max_new_tokens=max_new_tokens,
-        eos_id=tokenizer.eos_id,
-        temperature=temperature,
-        top_k=top_k,
-        repetition_penalty=repetition_penalty,
-    )
+    newline_ids = tokenizer.encode("\n")
+    newline_id = newline_ids[0] if newline_ids else None
 
-    new_ids = output_ids[len(input_ids):]
-    reply = clean_reply(
-        tokenizer.decode(new_ids, skip_special_tokens=True)
-    )
-    return reply, len(new_ids)
+    model.eval()
+    device = next(model.parameters()).device
+
+    for _ in range(max_new_tokens):
+        context = generated[-model.context_length:]
+        x = torch.tensor([context], dtype=torch.long, device=device)
+        logits = model(x)[0, -1, :].clone()
+
+        # Penalize only tokens already generated in the reply.
+        # Penalizing prompt tokens makes it harder to answer with words
+        # contained in the question (for example "GPU").
+        if repetition_penalty != 1.0:
+            for token_id in set(response_ids):
+                if logits[token_id] >= 0:
+                    logits[token_id] /= repetition_penalty
+                else:
+                    logits[token_id] *= repetition_penalty
+
+        if temperature <= 0:
+            next_id = int(torch.argmax(logits).item())
+        else:
+            logits = logits / temperature
+            if top_k is not None and 0 < top_k < logits.numel():
+                values, indices = torch.topk(logits, top_k)
+                probs = F.softmax(values, dim=-1)
+                selected = torch.multinomial(probs, 1)
+                next_id = int(indices[selected].item())
+            else:
+                probs = F.softmax(logits, dim=-1)
+                next_id = int(torch.multinomial(probs, 1).item())
+
+        if next_id == tokenizer.eos_id:
+            break
+        if newline_id is not None and next_id == newline_id:
+            break
+
+        generated.append(next_id)
+        response_ids.append(next_id)
+
+    reply = tokenizer.decode(
+        response_ids,
+        skip_special_tokens=True,
+    ).strip()
+
+    return reply, len(response_ids)
 
 
 def main() -> None:
@@ -96,10 +130,7 @@ def main() -> None:
     tokenizer_path = Path(args.tokenizer)
     model_path = Path(args.model)
     if not tokenizer_path.exists():
-        raise FileNotFoundError(
-            f"Tokenizer not found: {tokenizer_path}. "
-            "Run python train_corpus.py first."
-        )
+        raise FileNotFoundError(f"Tokenizer not found: {tokenizer_path}")
     if not model_path.exists():
         raise FileNotFoundError(
             f"Chat model not found: {model_path}. "
@@ -131,7 +162,7 @@ def main() -> None:
     print("Context length  :", model.context_length)
     print("Checkpoint loss :", checkpoint.get("loss"))
     print()
-    print("Type Japanese text. Commands: /reset, /exit")
+    print("Commands: /reset, /exit")
     print()
 
     history: List[Tuple[str, str]] = []
@@ -162,8 +193,12 @@ def main() -> None:
         )
         if device.type == "cuda":
             torch.cuda.synchronize()
+
         elapsed = time.perf_counter() - start
         rate = new_tokens / elapsed if elapsed > 0 else 0.0
+
+        if not reply:
+            reply = "(no response)"
 
         print(f"AI> {reply}")
         print(f"[{new_tokens} tokens, {elapsed:.2f}s, {rate:.1f} tok/s]")
