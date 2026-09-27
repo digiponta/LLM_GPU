@@ -9,14 +9,15 @@ from pathlib import Path
 
 import torch
 
+from semantic_encoder_adapter_v01 import (
+    ATTRIBUTE_LABELS,
+    CONCEPT_LABELS,
+    SemanticEncoderAdapter,
+    SemanticSupervisionHeads,
+)
 from semantic_encoder_adapter_v06 import (
     HIERARCHY_LABELS,
     InstructionSemanticHead,
-    load_semantic_adapter_v06_checkpoint,
-)
-from semantic_encoder_adapter_v01 import (
-    SemanticEncoderAdapter,
-    SemanticSupervisionHeads,
 )
 
 
@@ -49,8 +50,8 @@ def save_semantic_adapter_v061_checkpoint(
             "d_model": adapter.d_model,
             "adapter_hidden_dim": adapter.hidden_dim,
             "residual_scale": adapter.residual_scale,
-            "concept_labels": list(heads.concept_head.weight.new_zeros(0).shape)
-                if False else None,
+            "concept_labels": list(CONCEPT_LABELS),
+            "attribute_labels": list(ATTRIBUTE_LABELS),
             "hierarchy_labels": list(HIERARCHY_LABELS),
             "epoch": int(epoch),
             "loss": float(loss),
@@ -74,7 +75,6 @@ def load_semantic_adapter_v061_checkpoint(filename, device):
     if checkpoint.get("format") != "llm-gpu-v0.9.1-semantic-encoder-adapter-v0.6.1":
         raise ValueError("Not a Semantic Encoder Adapter v0.6.1 checkpoint.")
 
-    # Reuse the v0.6 checkpoint metadata conventions through the state shapes.
     adapter = SemanticEncoderAdapter(
         d_model=int(checkpoint["d_model"]),
         hidden_dim=int(checkpoint.get("adapter_hidden_dim", 64)),
@@ -83,18 +83,17 @@ def load_semantic_adapter_v061_checkpoint(filename, device):
     adapter.load_state_dict(checkpoint["adapter_state_dict"])
     adapter.eval()
 
-    # v0.6 uses the unchanged 6-concept / 4-attribute supervision heads.
     heads = SemanticSupervisionHeads(
         d_model=int(checkpoint["d_model"]),
-        num_concepts=6,
-        num_attributes=4,
+        num_concepts=len(checkpoint["concept_labels"]),
+        num_attributes=len(checkpoint["attribute_labels"]),
     ).to(device)
     heads.load_state_dict(checkpoint["heads_state_dict"])
     heads.eval()
 
     hierarchy_head = InstructionSemanticHead(
         d_model=int(checkpoint["d_model"]),
-        num_labels=len(HIERARCHY_LABELS),
+        num_labels=len(checkpoint["hierarchy_labels"]),
     ).to(device)
     hierarchy_head.load_state_dict(checkpoint["hierarchy_head_state_dict"])
     hierarchy_head.eval()
