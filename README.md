@@ -935,3 +935,100 @@ python evaluate_generalization_v07.py
 For publication-quality comparison, keep both scores: the original regression
 set measures regression stability, while the held-out set measures paraphrase
 generalization.
+
+### v0.7 augmented SFT + intent multi-task learning
+
+The final v0.7 SFT now addresses the weak 7/30 held-out paraphrase result with
+two complementary mechanisms.
+
+#### 1. Deterministic SFT data augmentation
+
+`augment_sft_v07.py` expands the original conversation/instruction pairs with
+intent-specific Japanese paraphrase templates. The default setting generates up
+to 24 variants per supported intent family.
+
+Covered intents include:
+
+```text
+GPU, CPU, LLM, Transformer, CUDA, Python
+short answer, topic change, repeat explanation, conversation end
+debug/error, research comparison
+greeting, fatigue, thanks, Japan capital
+```
+
+The augmentation is deterministic and requires no external API or LLM.
+The 30 held-out prompts in `evaluate_generalization_v07.py` were checked
+against the augmentation templates; there are no exact prompt overlaps.
+
+#### 2. Intent multi-task learning
+
+SFT now optimizes two objectives simultaneously:
+
+```text
+total_loss
+  = assistant_language_model_loss
+  + 0.25 * intent_classification_loss
+```
+
+The intent classifier reads the final hidden representation at the end of the
+user/assistant prompt prefix. Its gradients also update the base Transformer,
+encouraging semantically similar paraphrases to occupy intent-consistent
+representations.
+
+The classifier head is used only during training. Normal chat inference still
+uses the same v0.7 language-model architecture and checkpoint format.
+
+A separate diagnostic head is saved as:
+
+```text
+model/model-gpu-v0.7-intent-head.pt
+```
+
+The chat model remains:
+
+```text
+model/model-gpu-v0.7-chat.pt
+```
+
+#### Training
+
+The existing v0.7 BPE tokenizer and mixed-pretrained checkpoint can be reused:
+
+```powershell
+git checkout v0.7
+git pull
+
+python train_sft_v07.py
+python evaluate_chat.py
+python evaluate_generalization_v07.py
+```
+
+Default multi-task SFT settings:
+
+```text
+variants per intent : 24
+intent loss weight  : 0.25
+label smoothing     : 0.02
+learning rate       : 1e-5
+max epochs          : 30
+early stopping      : patience 5
+```
+
+Training now reports both language-model and intent metrics:
+
+```text
+train=... lm=... intent=... intent_acc=...
+val=...   lm=... intent=... intent_acc=...
+```
+
+Note that the saved checkpoint loss is now the combined validation objective,
+so it should not be compared directly with older answer-only SFT loss values.
+
+The key v0.7 success criteria are now:
+
+```text
+Regression semantic rate       : preserve the previous high score
+Technical semantic rate        : preserve 6/6 if possible
+Generalization semantic rate   : improve substantially beyond 7/30
+```
+
