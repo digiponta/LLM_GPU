@@ -575,6 +575,141 @@ PAIRWISE_HARD_NEGATIVE_ROWS: Sequence[Tuple[str, str, str]] = [
 ]
 
 
+# v0.9 Targeted Boundary Training.
+# Matched contrasts target the seven residual development failures without
+# copying the fixed 30 benchmark prompts verbatim. Surface forms are kept
+# deliberately similar while the decisive semantic cue changes.
+TARGETED_BOUNDARY_ROWS: Sequence[Tuple[str, str, str]] = [
+    # CPU <-> GPU: reverse identification and selection boundaries.
+    (
+        "多様な種類の命令を実行し、システム全体の制御を担う側はCPUとGPUのどちらですか。",
+        "CPUです。CPUは多様な命令の実行や汎用処理、制御を担当します。",
+        "tech_cpu",
+    ),
+    (
+        "同じ種類の計算を大量に同時実行する側はCPUとGPUのどちらですか。",
+        "GPUです。GPUは大量の同種計算を並列に処理することを得意とします。",
+        "tech_gpu",
+    ),
+    (
+        "幅広い処理を順序立てて実行する中心的な演算装置を答えてください。",
+        "CPUです。CPUは幅広い命令を実行する汎用的な演算装置です。",
+        "tech_cpu",
+    ),
+    (
+        "多数の演算を同時に進める用途に適した演算装置を答えてください。",
+        "GPUです。GPUは多数の演算を並列に処理することを得意とします。",
+        "tech_gpu",
+    ),
+
+    # Transformer <-> CUDA <-> Python category boundaries.
+    (
+        "情報同士の関係をAttentionで処理するニューラルネットワーク方式を答えてください。",
+        "Transformerです。TransformerはAttentionを中心に情報関係を処理するモデル構造です。",
+        "tech_transformer",
+    ),
+    (
+        "NVIDIA製GPUを計算資源として利用するためのソフトウェア技術を答えてください。",
+        "CUDAです。CUDAはNVIDIA GPUを汎用計算に利用するための技術です。",
+        "tech_cuda",
+    ),
+    (
+        "読みやすい記述を特徴とする汎用プログラミング言語を答えてください。",
+        "Pythonです。Pythonは読みやすい文法を持つ汎用プログラミング言語です。",
+        "tech_python",
+    ),
+    (
+        "Transformer・CUDA・Pythonのうち、Attentionを中心に系列を扱うものはどれですか。",
+        "Transformerです。TransformerはAttentionを中心とするモデル構造です。",
+        "tech_transformer",
+    ),
+    (
+        "Transformer・CUDA・Pythonのうち、NVIDIA GPU向け計算技術はどれですか。",
+        "CUDAです。CUDAはNVIDIA GPUを利用するための計算技術です。",
+        "tech_cuda",
+    ),
+    (
+        "Transformer・CUDA・Pythonのうち、汎用プログラミング言語はどれですか。",
+        "Pythonです。Pythonは汎用プログラミング言語です。",
+        "tech_python",
+    ),
+    (
+        "Attentionを使う構造とGPU計算技術を区別してください。前者は何ですか。",
+        "前者はTransformerです。TransformerはAttentionを使うモデル構造で、CUDAはGPU計算技術です。",
+        "tech_transformer",
+    ),
+    (
+        "GPU計算技術とプログラミング言語を区別してください。後者は何ですか。",
+        "後者はPythonです。Pythonはプログラミング言語で、CUDAはGPU計算技術です。",
+        "tech_python",
+    ),
+
+    # Conversational control matched boundaries:
+    # short = response length, repeat = re-explain, topic = switch subject,
+    # end = stop/continue later.
+    (
+        "内容はそのままで、返答だけ短めにしてください。",
+        "はい。要点だけ短く答えます。",
+        "control_short",
+    ),
+    (
+        "内容はそのままで、もっと簡単な表現でもう一度説明してください。",
+        "もちろんです。簡単な言葉に言い換えてもう一度説明します。",
+        "control_repeat",
+    ),
+    (
+        "この内容の説明は続けず、別の話へ切り替えましょう。",
+        "いいですよ。別の話題に切り替えましょう。",
+        "control_topic",
+    ),
+    (
+        "この内容の続きは今は扱わず、また後日にしましょう。",
+        "はい。また次回、続きから始めましょう。",
+        "control_end",
+    ),
+    (
+        "説明の長さだけを減らしてください。説明し直す必要はありません。",
+        "はい。説明し直さず、要点だけ簡潔に答えます。",
+        "control_short",
+    ),
+    (
+        "長さを短くするのではなく、理解しやすい言葉に言い換えてください。",
+        "もちろんです。分かりやすい言葉に言い換えて説明します。",
+        "control_repeat",
+    ),
+    (
+        "言い換えではなく、今とは別の話を始めたいです。",
+        "はい。別の話題へ移りましょう。",
+        "control_topic",
+    ),
+    (
+        "別の話を始めるのではなく、今日はここで区切って続きは後日にします。",
+        "お疲れさまでした。また次回、続きから始めましょう。",
+        "control_end",
+    ),
+    (
+        "返答を簡潔にしてください。話題は変更しません。",
+        "はい。同じ話題のまま簡潔に答えます。",
+        "control_short",
+    ),
+    (
+        "話題は変更しません。分からなかったので別の言葉で説明してください。",
+        "もちろんです。同じ話題を別の言葉で説明します。",
+        "control_repeat",
+    ),
+    (
+        "説明し直す必要はありません。別のテーマに移ってください。",
+        "はい。別のテーマに移りましょう。",
+        "control_topic",
+    ),
+    (
+        "新しいテーマには移らず、この会話はここで終えてください。",
+        "はい。ここで終わりにしましょう。また必要なときに続けましょう。",
+        "control_end",
+    ),
+]
+
+
 RELATION_AUGMENT_ROWS: Sequence[Tuple[str, str]] = [
     (
         "CPUとGPUの役割の違いを説明してください。",
@@ -622,6 +757,7 @@ RELATION_AUGMENT_ROWS: Sequence[Tuple[str, str]] = [
 def augment_pairs(
     base_pairs: Sequence[Pair],
     variants_per_intent: int = 24,
+    include_targeted_boundary: bool = False,
 ) -> List[LabeledPair]:
     """Return deduplicated base + deterministic synthetic multi-label rows."""
     output: List[LabeledPair] = []
@@ -648,6 +784,10 @@ def augment_pairs(
 
     for prompt, answer, label in PAIRWISE_HARD_NEGATIVE_ROWS:
         add(prompt, answer, label)
+
+    if include_targeted_boundary:
+        for prompt, answer, label in TARGETED_BOUNDARY_ROWS:
+            add(prompt, answer, label)
 
     for prompt, answer in RELATION_AUGMENT_ROWS:
         add(prompt, answer)
