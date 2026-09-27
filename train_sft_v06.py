@@ -1,8 +1,12 @@
 # train_sft_v06.py
 #
-# LLM_GPU v0.6 assistant-only supervised fine-tuning.
-# Starts from the mixed-pretrained v0.6 checkpoint and computes loss only
-# on AI answer tokens.
+# LLM_GPU v0.6 assistant-only SFT.
+#
+# Improvements over the first v0.6 SFT:
+# - combines conversational pairs and instruction/QA pairs
+# - deduplicates identical pairs
+# - uses mild label smoothing to reduce memorization / phrase collapse
+# - lower default learning rate to preserve mixed-pretrained language ability
 
 from __future__ import annotations
 
@@ -25,6 +29,7 @@ DEFAULT_TOKENIZER = "model/tokenizer-v0.6.json"
 DEFAULT_BASE_MODEL = "model/model-gpu-v0.6-pretrain.pt"
 DEFAULT_OUTPUT_MODEL = "model/model-gpu-v0.6-chat.pt"
 DEFAULT_DATA = "data/conversation-ja.txt"
+DEFAULT_INSTRUCTION_DATA = "data/instruction-ja.txt"
 
 USER_PREFIX = "人: "
 AI_PREFIX = "AI: "
@@ -37,14 +42,19 @@ def parse_args() -> argparse.Namespace:
         description="Assistant-only SFT for LLM_GPU v0.6."
     )
     parser.add_argument("--data", default=DEFAULT_DATA)
+    parser.add_argument(
+        "--instruction-data",
+        default=DEFAULT_INSTRUCTION_DATA,
+    )
     parser.add_argument("--tokenizer", default=DEFAULT_TOKENIZER)
     parser.add_argument("--base-model", default=DEFAULT_BASE_MODEL)
     parser.add_argument("--output", default=DEFAULT_OUTPUT_MODEL)
     parser.add_argument("--epochs", type=int, default=30)
-    parser.add_argument("--learning-rate", type=float, default=2e-5)
+    parser.add_argument("--learning-rate", type=float, default=1e-5)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--validation-ratio", type=float, default=0.15)
     parser.add_argument("--patience", type=int, default=5)
+    parser.add_argument("--label-smoothing", type=float, default=0.05)
     return parser.parse_args()
 
 
@@ -52,9 +62,7 @@ def select_device() -> torch.device:
     if torch.cuda.is_available():
         return torch.device("cuda")
     if REQUIRE_CUDA:
-        raise RuntimeError(
-            "CUDA is not available. Run python check_gpu.py first."
-        )
+        raise RuntimeError("CUDA is not available. Run python check_gpu.py.")
     return torch.device("cpu")
 
 
@@ -75,9 +83,43 @@ def parse_dialogues(text: str) -> List[Tuple[str, str]]:
                 pairs.append((pending_user, answer))
             pending_user = None
 
-    if not pairs:
-        raise ValueError("No dialogue pairs found.")
     return pairs
+
+
+def parse_instruction_pairs(text: str) -> List[Tuple[str, str]]:
+    pairs: List[Tuple[str, str]] = []
+    pending_prompt = None
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+
+        if line.startswith("質問:"):
+            pending_prompt = line[len("質問:"):].strip()
+        elif line.startswith("指示:"):
+            pending_prompt = line[len("指示:"):].strip()
+        elif line.startswith("回答:") and pending_prompt is not None:
+            answer = line[len("回答:"):].strip()
+            if pending_prompt and answer:
+                pairs.append((pending_prompt, answer))
+            pending_prompt = None
+
+    return pairs
+
+
+def deduplicate_pairs(
+    pairs: Sequence[Tuple[str, str]],
+) -> List[Tuple[str, str]]:
+    seen = set()
+    output = []
+    for user_text, answer_text in pairs:
+        key = (user_text.strip(), answer_text.strip())
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(key)
+    return output
 
 
 class ConversationDataset(Dataset):
@@ -117,6 +159,9 @@ class ConversationDataset(Dataset):
             ]
 
             pad_count = context_length - len(x)
+            if pad_count < 0:
+                raise RuntimeError("Conversation sample exceeded context.")
+
             x += [tokenizer.pad_id] * pad_count
             y += [tokenizer.pad_id] * pad_count
             loss_mask += [0.0] * pad_count
@@ -134,29 +179,49 @@ class ConversationDataset(Dataset):
         return self.rows[index]
 
 
-def masked_loss(model, input_ids, targets, mask):
+def masked_loss(
+    model,
+    input_ids,
+    targets,
+    mask,
+    label_smoothing: float,
+):
     logits = model(input_ids)
     losses = F.cross_entropy(
         logits.reshape(-1, logits.size(-1)),
         targets.reshape(-1),
         reduction="none",
+        label_smoothing=label_smoothing,
     ).view_as(targets)
     return (losses * mask).sum() / mask.sum().clamp_min(1.0)
 
 
 @torch.no_grad()
-def evaluate(model, loader, device) -> float:
+def evaluate(
+    model,
+    loader,
+    device,
+    label_smoothing: float,
+) -> float:
     model.eval()
     total = 0.0
     batches = 0
+
     for input_ids, targets, mask in loader:
         input_ids = input_ids.to(device)
         targets = targets.to(device)
         mask = mask.to(device)
         total += float(
-            masked_loss(model, input_ids, targets, mask).item()
+            masked_loss(
+                model,
+                input_ids,
+                targets,
+                mask,
+                label_smoothing,
+            ).item()
         )
         batches += 1
+
     return total / max(1, batches)
 
 
@@ -167,11 +232,17 @@ def main() -> None:
 
     print()
     print("====================================")
-    print(" LLM_GPU v0.6 Conversational SFT")
+    print(" LLM_GPU v0.6 Combined SFT")
     print("====================================")
     print()
 
-    for filename in (args.data, args.tokenizer, args.base_model):
+    required = (
+        args.data,
+        args.instruction_data,
+        args.tokenizer,
+        args.base_model,
+    )
+    for filename in required:
         if not Path(filename).exists():
             raise FileNotFoundError(f"Required file not found: {filename}")
 
@@ -185,9 +256,19 @@ def main() -> None:
     if model.vocab_size != tokenizer.vocab_size:
         raise ValueError("Tokenizer/model vocabulary mismatch.")
 
-    pairs = parse_dialogues(
+    conversation_pairs = parse_dialogues(
         Path(args.data).read_text(encoding="utf-8")
     )
+    instruction_pairs = parse_instruction_pairs(
+        Path(args.instruction_data).read_text(encoding="utf-8")
+    )
+
+    pairs = deduplicate_pairs(
+        conversation_pairs + instruction_pairs
+    )
+    if len(pairs) < 2:
+        raise ValueError("Not enough SFT pairs.")
+
     shuffled = list(pairs)
     random.shuffle(shuffled)
 
@@ -228,20 +309,23 @@ def main() -> None:
         weight_decay=0.01,
     )
 
-    print("Device          :", device)
+    print("Device            :", device)
     if device.type == "cuda":
-        print("GPU             :", torch.cuda.get_device_name(0))
-    print("Base checkpoint :", args.base_model)
-    print("Base loss       :", checkpoint.get("loss"))
-    print("Dialogue pairs  :", len(pairs))
-    print("Train pairs     :", len(train_pairs))
-    print("Validation pairs:", len(val_pairs))
-    print("Context length  :", model.context_length)
-    print("Parameters      :", f"{model.parameter_count:,}")
-    print("Heads           :", model.num_heads)
-    print("Epoch limit     :", args.epochs)
-    print("Learning rate   :", args.learning_rate)
-    print("Early stopping  :", f"patience={args.patience}")
+        print("GPU               :", torch.cuda.get_device_name(0))
+    print("Base checkpoint   :", args.base_model)
+    print("Base loss         :", checkpoint.get("loss"))
+    print("Conversation pairs:", len(conversation_pairs))
+    print("Instruction pairs :", len(instruction_pairs))
+    print("Combined unique   :", len(pairs))
+    print("Train pairs       :", len(train_pairs))
+    print("Validation pairs  :", len(val_pairs))
+    print("Context length    :", model.context_length)
+    print("Parameters        :", f"{model.parameter_count:,}")
+    print("Heads             :", model.num_heads)
+    print("Epoch limit       :", args.epochs)
+    print("Learning rate     :", args.learning_rate)
+    print("Label smoothing   :", args.label_smoothing)
+    print("Early stopping    :", f"patience={args.patience}")
     print()
 
     best_val = float("inf")
@@ -261,7 +345,13 @@ def main() -> None:
             mask = mask.to(device, non_blocking=True)
 
             optimizer.zero_grad(set_to_none=True)
-            loss = masked_loss(model, input_ids, targets, mask)
+            loss = masked_loss(
+                model,
+                input_ids,
+                targets,
+                mask,
+                args.label_smoothing,
+            )
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
@@ -270,7 +360,12 @@ def main() -> None:
             batches += 1
 
         train_loss = total / max(1, batches)
-        val_loss = evaluate(model, val_loader, device)
+        val_loss = evaluate(
+            model,
+            val_loader,
+            device,
+            args.label_smoothing,
+        )
         elapsed = time.perf_counter() - started
 
         print(
@@ -309,9 +404,9 @@ def main() -> None:
 
     print()
     print("SFT completed.")
-    print("Best epoch      :", best_epoch)
-    print("Best val loss   :", f"{best_val:.6f}")
-    print("Model saved     :", args.output)
+    print("Best epoch       :", best_epoch)
+    print("Best val loss    :", f"{best_val:.6f}")
+    print("Model saved      :", args.output)
     print()
     print("Next:")
     print("  python evaluate_chat.py")
