@@ -655,3 +655,138 @@ python evaluate_chat.py
 
 If the corrected smoke test is sound, proceed to the full run with
 `python train_mixed.py`.
+
+
+---
+
+## v0.7: Byte-level BPE Tokenizer Experiment
+
+v0.7 keeps the successful v0.6 Transformer architecture and changes the main
+experimental variable from character-level tokenization to byte-level BPE.
+
+The motivation is the remaining v0.6 failure mode where semantically related
+Japanese strings can still be confused at the character level. BPE can learn
+multi-character units such as frequently occurring Japanese expressions,
+technical terms, and response fragments while byte-level fallback keeps the
+tokenizer robust for previously unseen Unicode text.
+
+### v0.7 architecture
+
+```text
+Tokenizer             : byte-level BPE
+Target vocabulary     : 8,000
+d_model               : 128
+Transformer layers    : 4
+Attention heads       : 4
+FFN dimension         : 512
+Context length        : 256 subword tokens
+Positional embedding  : learned
+Mixed pretraining     : curriculum
+SFT                   : assistant-only + label smoothing
+```
+
+The Transformer dimensions deliberately remain the same as v0.6 so the
+tokenizer effect can be compared more directly.
+
+### New files
+
+```text
+tokenizer_bpe.py       byte-level BPE wrapper
+train_mixed_v07.py     v0.7 BPE curriculum pretraining
+train_sft_v07.py       v0.7 BPE conversational/instruction SFT
+```
+
+The original `tokenizer.py`, `train_mixed.py`, and
+`train_sft_v06.py` remain in the repository so the v0.6 experiment is
+reproducible.
+
+### Dependency
+
+v0.7 adds Hugging Face `tokenizers`:
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+### Important: v0.6 checkpoints cannot be reused
+
+A tokenizer change changes the vocabulary IDs and embedding/output dimensions.
+Therefore v0.7 must be trained from scratch.
+
+v0.7 uses separate files:
+
+```text
+model/tokenizer-v0.7-bpe.json
+model/model-gpu-v0.7-pretrain.pt
+model/model-gpu-v0.7-chat.pt
+```
+
+### Smoke test
+
+```powershell
+git checkout v0.7
+git pull
+python -m pip install -r requirements.txt
+
+python train_mixed_v07.py --samples 20000
+python train_sft_v07.py
+python evaluate_chat.py
+python chat.py
+```
+
+During pretraining the script reports `Chars/token`. With character-level
+tokenization this value is effectively near 1 character per token; a value
+above 1 for v0.7 indicates that BPE has learned multi-character units.
+
+### Full experiment
+
+After the complete smoke-test pipeline works:
+
+```powershell
+python train_mixed_v07.py
+python train_sft_v07.py
+python evaluate_chat.py
+python chat.py
+```
+
+Default pretraining remains 500,000 samples, context 256, batch size 32, and
+one epoch, preserving the v0.6 curriculum:
+
+```text
+Phase A (first 80%):
+  90% general / 7% conversation / 3% instruction
+
+Phase B (last 20%):
+  70% general / 20% conversation / 10% instruction
+```
+
+### BPE-aware generation
+
+With BPE, a newline or role marker may span multiple token IDs. The v0.7
+`chat.py` therefore no longer assumes that newline is one token. It decodes
+the generated subword sequence incrementally and stops at textual newline /
+role boundaries.
+
+### Comparison target
+
+```text
+v0.6:
+  character tokenizer
+  500k curriculum pretraining
+  evaluation: 7/10 keyword hits
+
+v0.7:
+  byte-level BPE tokenizer
+  same Transformer dimensions
+  same curriculum/SFT concept
+  evaluation: to be measured
+```
+
+The key v0.7 questions are:
+
+1. Does BPE improve Japanese sentence stability?
+2. Does it reduce intent confusion for paraphrased prompts?
+3. Does the same context length carry more semantic content because common
+   multi-character sequences become single tokens?
+4. Does evaluation improve beyond the v0.6 70% result without increasing the
+   Transformer depth or width?
