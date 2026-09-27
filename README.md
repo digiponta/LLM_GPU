@@ -5620,4 +5620,86 @@ G28 CPU retained
 semantic >= 26/30
 strict >= 26/30
 ```
+### v0.9.1 v0.12.1: Entity-Target Logit Alignment
 
+v0.12 proved that a direct semantic/lexical logit path can change first-token
+generation, but its supervision was still generic SFT first-token prediction.
+v0.12.1 replaces that target with explicit technical entity names.
+
+Target map:
+
+```text
+tech_cpu         -> CPU
+tech_gpu         -> GPU
+tech_llm         -> LLM
+tech_transformer -> Transformer
+tech_cuda        -> CUDA
+tech_python      -> Python
+```
+
+The fixed 30-case evaluation prompts are not used as training rows. In
+particular, the exact G05 prompt remains held out.
+
+Training uses separate semantic-neighborhood prompts for the six concepts and
+optimizes frozen v0.11 first-token logits plus entity-target direct logit bias
+against the first tokenizer token of the explicit entity name.
+
+Architecture:
+
+```text
+345-d semantic + lexical condition
+ -> LayerNorm
+ -> Linear(345 -> 64)
+ -> GELU
+ -> Linear(64 -> vocab)
+ -> beta = 0.30
+ -> first assistant token only
+```
+
+Frozen:
+
+```text
+v0.11 generation model/projection
+v0.8 semantic path
+v0.10.2 CPU name binding
+LM Head
+```
+
+The evaluator additionally prints tokenizer decomposition for CPU, GPU, LLM,
+Transformer, CUDA, and Python. For both G05 wordings it also reports each
+entity first token's base logit, direct bias, base rank, and combined rank.
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_entity_target_logit_alignment_v0121.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v0.9.1-entity-target-logit-v0121.pt
+```
+
+Logs:
+
+```text
+results/entity_target_logit_v0121/train.log
+results/entity_target_logit_v0121/eval.log
+```
+
+Primary targets:
+
+```text
+Original G05 -> CPU
+Name-request G05 -> CPU
+CPU first-token rank improves strongly on G05
+G08 -> Transformer
+G09 -> CUDA
+G10 -> Python
+G27 -> GPU
+G28 -> CPU
+```
