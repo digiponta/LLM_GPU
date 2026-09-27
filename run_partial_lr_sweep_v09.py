@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import csv
 import re
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -73,6 +74,13 @@ def lr_tag(value: float) -> str:
     return text.replace(".", "p").replace("+", "")
 
 
+def utf8_child_env():
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    return env
+
+
 def run_command(
     command: List[str],
     log_path: Path,
@@ -82,10 +90,11 @@ def run_command(
         command,
         text=True,
         encoding="utf-8",
-        errors="replace",
+        errors="strict",
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         check=False,
+        env=utf8_child_env(),
     )
 
     output = process.stdout or ""
