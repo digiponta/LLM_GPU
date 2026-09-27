@@ -4152,3 +4152,105 @@ technical held-out accuracy does not regress
 Generation is intentionally not retrained in this step. The semantic definition
 is validated first.
 
+### v0.9.1 Semantic Encoder Adapter v0.6.1: Instruction Binding Refinement
+
+v0.6 passed 7/8 semantic gates. The remaining failure was specific:
+
+```text
+G05:
+heterogeneous_instruction
+<
+homogeneous_computation
+```
+
+even though the overall CPU-style score and centroid classification were
+correct.
+
+v0.6.1 therefore does not change the architecture. It performs a targeted
+binding refinement from the v0.6 checkpoint.
+
+Focus:
+
+```text
+heterogeneous_instruction
+  >
+homogeneous_computation
+```
+
+for CPU-like diverse-instruction prompts, while preserving the v0.6 semantic
+geometry.
+
+Important constraints:
+
+```text
+exact G05 prompt used for training : no
+base encoder                       : frozen
+concept / attribute heads          : frozen
+adapter                            : trainable
+7-axis hierarchy head              : trainable
+generation                         : unchanged
+```
+
+New paraphrase supervision includes:
+
+```text
+CPU handles arithmetic and non-arithmetic instructions.
+Diverse instructions are not equivalent to repeating one computation.
+CPU instruction processing includes branch, compare, load, store and control.
+Mixed instruction streams are CPU-like.
+Repeated homogeneous computation is GPU-like.
+```
+
+The direct binding loss uses a pairwise margin:
+
+```text
+CPU-like:
+P(heterogeneous_instruction)
+  >=
+P(homogeneous_computation) + 0.30
+
+GPU-like:
+P(homogeneous_computation)
+  >=
+P(heterogeneous_instruction) + 0.30
+```
+
+The experiment also preserves the existing v0.6 hierarchy predictions and
+adapter representation on the previous semantic supervision bank.
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_semantic_encoder_adapter_v061.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v0.9.1-semantic-adapter-v061.pt
+```
+
+Logs:
+
+```text
+results/semantic_encoder_adapter_v061/train.log
+results/semantic_encoder_adapter_v061/eval.log
+```
+
+Primary gate:
+
+```text
+G05 centroid -> CPU
+G05 heterogeneous_instruction > homogeneous_computation
+G08 Transformer retained
+technical held-out accuracy does not regress
+diverse / mixed instructions -> CPU-like
+repeated homogeneous computation -> GPU-like
+```
+
+Only after this binding gate passes should the refined semantic adapter be
+reconnected to a generation experiment.
+
