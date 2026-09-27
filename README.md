@@ -7324,3 +7324,117 @@ benchmark regression
     -> alignment weight/margin is too strong and should be swept.
 ```
 
+### v0.10.4: Semantic-to-Global-Output Alignment
+
+v0.10.3 showed that first-token semantic/entity alignment can improve lexical
+selection, but it did not fully solve generation:
+
+```text
+v0.10.3 semantic/strict : 26/30
+G05                     : semantic CPU, output still GPU-like
+G08                     : first token repaired to "Transformer"
+G28                     : semantic CPU, but direct answer started with GPU
+```
+
+The v0.10.4 experiment keeps the best v0.10.2 consistency setting and adds two
+new objectives.
+
+1. Global-vocabulary alignment
+
+The target semantic entity must beat the strongest competing token in the
+entire vocabulary at the first answer position:
+
+```text
+L_global =
+  max(0,
+      margin
+      - logit(target_entity)
+      + max(logit(all_other_vocab_tokens)))
+```
+
+2. Short continuation alignment
+
+The first four answer tokens receive an additional LM loss. This tests whether
+the semantic correction can persist beyond only the first entity token.
+
+The total objective is:
+
+```text
+L_total =
+    L_LM
+  + 0.50 * L_semantic_consistency
+  + 0.05 * L_entity_alignment
+  + 0.05 * L_global_alignment
+  + 0.05 * L_first4_continuation
+```
+
+Default settings:
+
+```text
+Consistency weight       : 0.50
+LM Head LR               : 3e-6
+Blocks 4-6 LR            : 1e-5
+Projection LR            : 1e-3
+Consistency-head LR      : 1e-3
+
+Entity alignment weight  : 0.05
+Entity alignment margin  : 0.75
+Global alignment weight  : 0.05
+Global alignment margin  : 0.50
+Continuation weight      : 0.05
+Continuation tokens      : 4
+Alignment confidence     : 0.70
+```
+
+New files:
+
+```text
+train_semantic_global_output_alignment_v0104.py
+evaluate_semantic_global_output_alignment_v0104.py
+run_semantic_global_output_alignment_v0104.py
+```
+
+The evaluator also adds a direct-entity check for the benchmark cases where
+the answer should begin with a concrete entity:
+
+```text
+G05 -> CPU
+G08 -> Transformer
+G09 -> CUDA
+G10 -> Python
+G27 -> GPU
+G28 -> CPU
+```
+
+This prevents a response such as "GPUです...CPUは汎用処理..." from being
+counted as fully correct for a question whose direct answer is CPU.
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v0.10.4
+git pull origin v0.10.4
+
+python run_semantic_global_output_alignment_v0104.py
+```
+
+Outputs:
+
+```text
+model/model-gpu-v0.10.4-semantic-global-output-aligned.pt
+results/semantic_global_output_alignment_v0104/train.log
+results/semantic_global_output_alignment_v0104/evaluation.log
+```
+
+Primary success criteria:
+
+```text
+1. G05 begins with CPU and remains semantically CPU-like.
+2. G08 begins cleanly with Transformer and improves continuation.
+3. G09 remains CUDA-correct.
+4. G28 begins with CPU, not GPU.
+5. Corrected strict score reaches at least 27/30 without fluency regression.
+6. Global alignment loss decreases without destabilizing validation LM loss.
+```
+
