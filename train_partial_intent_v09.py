@@ -63,6 +63,8 @@ TECHNICAL_TAGS = {
     "tech_transformer", "tech_cuda", "tech_python",
 }
 PROTECTED_BOUNDARY_REPLAY_TAGS = {"protected_boundary_replay"}
+BALANCED_STABLE_REPLAY_TAGS = {"balanced_stable_replay"}
+BALANCED_CONTROL_REPLAY_TAGS = {"balanced_control_replay"}
 
 
 def parse_args() -> argparse.Namespace:
@@ -107,6 +109,23 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=3,
         help="Training repeat factor for protected Boundary v3 rows.",
+    )
+    p.add_argument(
+        "--balanced-control-replay",
+        action="store_true",
+        help="Include Boundary v4 balanced stable/control replay rows.",
+    )
+    p.add_argument(
+        "--stable-replay-repeat",
+        type=int,
+        default=2,
+        help="Replay factor for stable protected capabilities in Boundary v4.",
+    )
+    p.add_argument(
+        "--control-replay-repeat",
+        type=int,
+        default=3,
+        help="Replay factor for short/repeat control rows in Boundary v4.",
     )
     return p.parse_args()
 
@@ -390,6 +409,7 @@ def main() -> None:
         include_targeted_boundary=args.targeted_boundary,
         include_targeted_boundary_v2=args.targeted_boundary_v2,
         include_protected_boundary_replay=args.protected_boundary_replay,
+        include_balanced_control_replay=args.balanced_control_replay,
     )
 
     train_rows, val_rows = stratified_split(
@@ -413,6 +433,17 @@ def main() -> None:
             train_rows,
             args.protected_replay_repeat,
             PROTECTED_BOUNDARY_REPLAY_TAGS,
+        )
+    if args.balanced_control_replay:
+        train_rows = oversample(
+            train_rows,
+            args.stable_replay_repeat,
+            BALANCED_STABLE_REPLAY_TAGS,
+        )
+        train_rows = oversample(
+            train_rows,
+            args.control_replay_repeat,
+            BALANCED_CONTROL_REPLAY_TAGS,
         )
 
     train_set = PartialIntentDataset(
@@ -482,6 +513,9 @@ def main() -> None:
     print("Targeted boundary v2  :", args.targeted_boundary_v2)
     print("Protected replay      :", args.protected_boundary_replay)
     print("Protected repeat      :", args.protected_replay_repeat)
+    print("Balanced control      :", args.balanced_control_replay)
+    print("Stable replay repeat  :", args.stable_replay_repeat)
+    print("Control replay repeat :", args.control_replay_repeat)
     print(
         "Projection params     :",
         sum(p.numel() for p in projection.parameters()),
