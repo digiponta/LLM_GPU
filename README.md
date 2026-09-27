@@ -598,3 +598,60 @@ v0.6
 ~2M+ params / context 256 / 4 heads / positional embedding
 / mixed pretraining / assistant-only SFT
 ```
+
+
+### v0.6 conversational-quality correction
+
+After the first v0.6 smoke evaluation improved the keyword hit rate but still
+showed phrase collapse such as malformed Japanese and repeated high-frequency
+phrases, the training pipeline was revised.
+
+The mixed-pretraining schedule is now curriculum-based:
+
+```text
+first 80% of samples:
+  90% general / 7% conversation / 3% instruction
+
+last 20% of samples:
+  70% general / 20% conversation / 10% instruction
+```
+
+This prevents the very small dialogue and instruction corpora from dominating
+before the base Japanese language distribution is learned.
+
+The v0.6 SFT stage now combines:
+
+```text
+conversation-ja.txt
+        +
+instruction-ja.txt converted to user/assistant pairs
+        |
+        v
+deduplication
+        |
+assistant-only loss
+        |
+label smoothing = 0.05
+        |
+early stopping
+```
+
+The default SFT learning rate was reduced from `2e-5` to `1e-5` to reduce
+damage to the mixed-pretrained language model.
+
+Because the tokenizer vocabulary and the pretraining distribution changed,
+old v0.6 checkpoints should not be reused after this correction. Retrain from
+the beginning:
+
+```powershell
+Remove-Item model\model-gpu-v0.6-pretrain.pt -ErrorAction SilentlyContinue
+Remove-Item model\model-gpu-v0.6-chat.pt -ErrorAction SilentlyContinue
+Remove-Item model\tokenizer-v0.6.json -ErrorAction SilentlyContinue
+
+python train_mixed.py --samples 20000
+python train_sft_v06.py
+python evaluate_chat.py
+```
+
+If the corrected smoke test is sound, proceed to the full run with
+`python train_mixed.py`.
