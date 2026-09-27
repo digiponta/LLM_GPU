@@ -1969,3 +1969,80 @@ generation failed, especially G14, G15, G18, and G28. Improvement there would
 support the hypothesis that the intent signal needs to enter the Transformer
 before the final LM head.
 
+### v0.9 Partial Fine-Tuning
+
+The projection-only mid-layer experiment remained at the same 22/30 strict
+score as the v0.8 baseline. v0.9 therefore adds partial fine-tuning so the
+Transformer layers after the injection point can learn how to use the intent
+signal.
+
+Architecture:
+
+```text
+Frozen intent path
+------------------
+v0.8 pairwise-best model
+  -> frozen intent head
+  -> sigmoid probabilities (24 dims)
+
+Generation path
+---------------
+Blocks 1-3      : frozen
+Intent projection 24 -> 256 : trainable
+Inject after Block 3
+Blocks 4-6      : trainable
+FinalNorm       : trainable
+LM Head         : frozen
+```
+
+The intent path uses a separate frozen copy of the v0.8 model. This keeps the
+intent-head input distribution fixed while the generation-side Blocks 4-6 are
+adapted.
+
+Default learning rates:
+
+```text
+Intent projection : 1e-3
+Blocks 4-6        : 2e-6
+FinalNorm         : 2e-6
+LM Head           : frozen
+```
+
+Default checkpoint:
+
+```text
+model/model-gpu-v0.9-partial-intent.pt
+```
+
+Train:
+
+```powershell
+git checkout v0.9
+git pull
+
+python train_partial_intent_v09.py
+```
+
+Evaluate on the unchanged 30-case benchmark:
+
+```powershell
+python evaluate_partial_intent_v09.py
+```
+
+Interactive chat:
+
+```powershell
+python chat_partial_intent_v09.py
+```
+
+The comparison baseline remains:
+
+```text
+Semantic-content : 22/30 = 73.3%
+Strict composite : 22/30 = 73.3%
+```
+
+The first success criterion is improvement on G14, G15, G18, and G28 without
+regressing the already stable GPU, error, comparison, CUDA/GPU, and
+LLM/Transformer cases.
+
