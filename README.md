@@ -2560,3 +2560,81 @@ Boundary v1 Strict   : 25/30 = 83.3%
 
 Regression watch items include Python, GPU/CPU, topic, end, repeat, and compare.
 
+### v0.9 Intent Representation v2: semantic hidden + intent probabilities
+
+The Boundary v1 configuration remains the cleanest 25/30 development result.
+Later replay experiments and LM-head unfreezing introduced interference or
+output-distribution regressions. Intent Representation v2 therefore changes
+only the conditioning representation.
+
+Old representation:
+
+```text
+24-d intent probabilities
+  -> Linear(24 -> 256)
+  -> inject after Block 3
+```
+
+New representation:
+
+```text
+24-d intent probabilities
++
+256-d frozen prompt semantic hidden
+=
+280-d fused representation
+  -> zero-initialized Linear(280 -> 256)
+  -> alpha scaling
+  -> inject after Block 3
+```
+
+The semantic hidden state is read from the same frozen v0.8 intent model used
+by the intent head. This keeps the semantic representation stationary while
+Blocks 4-6 learn how to use the richer signal.
+
+Fixed experiment settings:
+
+```text
+Boundary data        : v1 only
+Projection LR        : 1e-3
+Blocks 4-6 LR        : 1e-5
+FinalNorm LR         : 1e-5
+LM Head              : frozen
+Alpha                : 0.1
+Inject after         : Block 3
+Intent model/head    : frozen
+```
+
+Run:
+
+```powershell
+git checkout v0.9
+git pull
+
+python run_intent_representation_v2_v09.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v0.9-intent-representation-v2.pt
+```
+
+Logs:
+
+```text
+results/intent_representation_v2_v09/train.log
+results/intent_representation_v2_v09/eval.log
+```
+
+Reference:
+
+```text
+Boundary v1 Semantic : 25/30 = 83.3%
+Boundary v1 Strict   : 25/30 = 83.3%
+```
+
+The main targets are G05 CPU reverse identification and G08 Transformer
+category completion. The experiment also watches for regressions on Python,
+GPU/CPU, topic, end, repeat, and compare.
+
