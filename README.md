@@ -2130,3 +2130,50 @@ The experiment tests whether the unchanged 22/30 ceiling is due to insufficient
 adaptation strength in Blocks 4-6, or whether the current intent representation
 and training data are the more likely bottleneck.
 
+### v0.9 local block-LR refinement
+
+After the coarse Partial Fine-Tuning sweep, the first improvement beyond the
+22/30 ceiling was observed at:
+
+```text
+block LR : 1e-5
+strict   : 23/30 = 76.7%
+```
+
+The next experiment narrows the search around that point:
+
+```text
+7.5e-6
+1.0e-5
+1.25e-5
+1.5e-5
+```
+
+Run:
+
+```powershell
+git checkout v0.9
+git pull
+
+python run_partial_lr_local_sweep_v09.py
+```
+
+The wrapper reuses the same training and fixed 30-case evaluation pipeline and
+writes its results separately under:
+
+```text
+results/partial_lr_local_sweep_v09/
+```
+
+Checkpoint filenames now preserve fractional scientific-notation values without
+collisions, for example:
+
+```text
+7.5e-6  -> model-gpu-v0.9-partial-intent-blocklr-7p5e-6.pt
+1.25e-5 -> model-gpu-v0.9-partial-intent-blocklr-1p25e-5.pt
+```
+
+The goal is to find whether a point near 1e-5 can preserve the new `end`
+improvement while avoiding the CPU regression seen at the stronger 2e-5
+setting.
+
