@@ -55,6 +55,15 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--label-smoothing", type=float, default=0.02)
     p.add_argument("--intent-loss-weight", type=float, default=0.25)
     p.add_argument("--variants-per-intent", type=int, default=24)
+    p.add_argument(
+        "--technical-repeat",
+        type=int,
+        default=3,
+        help=(
+            "Training-only repeat factor for rows carrying technical concept "
+            "tags. Validation rows are never oversampled."
+        ),
+    )
     return p.parse_args()
 
 
@@ -322,6 +331,33 @@ def compute_pos_weight(
 
     return torch.tensor(values, dtype=torch.float32, device=device)
 
+
+TECHNICAL_TAGS = {
+    "tech_gpu",
+    "tech_cpu",
+    "tech_llm",
+    "tech_transformer",
+    "tech_cuda",
+    "tech_python",
+}
+
+
+def oversample_technical_rows(
+    rows: Sequence[Tuple[str, str, Tuple[str, ...]]],
+    repeat: int,
+) -> List[Tuple[str, str, Tuple[str, ...]]]:
+    """Repeat technical rows in training only; keep validation untouched."""
+    if repeat < 1:
+        raise ValueError("--technical-repeat must be >= 1.")
+
+    output = []
+    for row in rows:
+        output.append(row)
+        if any(tag in TECHNICAL_TAGS for tag in row[2]):
+            for _ in range(repeat - 1):
+                output.append(row)
+    return output
+
 def main() -> None:
     args = parse_args()
     torch.manual_seed(SEED)
@@ -373,6 +409,11 @@ def main() -> None:
         validation_ratio=args.validation_ratio,
         seed=SEED,
     )
+    original_train_count = len(train_rows)
+    train_rows = oversample_technical_rows(
+        train_rows,
+        repeat=args.technical_repeat,
+    )
     pos_weight = compute_pos_weight(train_rows, labels, device)
 
     train_set = MultiTaskDataset(
@@ -417,7 +458,9 @@ def main() -> None:
     print("Augmented pairs    :", len(augmented_rows))
     print("Intent tags        :", len(labels))
     print("Intent tag names   :", ", ".join(labels))
-    print("Train rows         :", len(train_rows))
+    print("Train rows (base)  :", original_train_count)
+    print("Train rows (bound) :", len(train_rows))
+    print("Technical repeat   :", args.technical_repeat)
     print("Validation rows    :", len(val_rows))
     print("Multi-label weight :", args.intent_loss_weight)
     print(
