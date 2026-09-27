@@ -45,7 +45,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--validation-ratio", type=float, default=0.15)
     parser.add_argument("--patience", type=int, default=5)
-    parser.add_argument("--label-smoothing", type=float, default=0.05)
+    parser.add_argument("--label-smoothing", type=float, default=0.02)
     return parser.parse_args()
 
 
@@ -104,6 +104,73 @@ def deduplicate_pairs(
             seen.add(key)
             output.append(key)
     return output
+
+
+def intent_group(text: str) -> str:
+    """Coarse intent grouping used only to make validation more balanced."""
+    upper = text.upper()
+    technical = (
+        "GPU", "CPU", "LLM", "TRANSFORMER", "CUDA", "PYTHON"
+    )
+    for name in technical:
+        if name in upper:
+            return f"tech:{name.lower()}"
+
+    rules = [
+        ("control:short", ("短く", "簡潔", "要点")),
+        ("control:topic", ("話題", "別の話", "違う話")),
+        ("control:repeat", ("もう一度", "分かりやす", "説明")),
+        ("control:end", ("ここまで", "終わり", "終わります")),
+        ("debug:error", ("エラー", "動かない", "失敗")),
+        ("research:compare", ("比較", "比べ", "実験結果")),
+        ("greeting", ("こんにちは", "おはよう", "こんばんは", "元気")),
+        ("fatigue", ("疲れ", "眠い")),
+    ]
+    for label, keys in rules:
+        if any(key in text for key in keys):
+            return label
+    return "other"
+
+
+def stratified_split(
+    pairs: Sequence[Tuple[str, str]],
+    validation_ratio: float,
+    seed: int,
+) -> Tuple[List[Tuple[str, str]], List[Tuple[str, str]]]:
+    """Split within intent groups so rare technical intents stay represented."""
+    groups = {}
+    for pair in pairs:
+        groups.setdefault(intent_group(pair[0]), []).append(pair)
+
+    rng = random.Random(seed)
+    train_pairs = []
+    val_pairs = []
+
+    for label in sorted(groups):
+        items = list(groups[label])
+        rng.shuffle(items)
+
+        if len(items) >= 4:
+            count = max(1, int(round(len(items) * validation_ratio)))
+            count = min(count, len(items) - 2)
+        elif len(items) == 3:
+            count = 1
+        else:
+            count = 0
+
+        val_pairs.extend(items[:count])
+        train_pairs.extend(items[count:])
+
+    rng.shuffle(train_pairs)
+    rng.shuffle(val_pairs)
+
+    if not val_pairs:
+        shuffled = list(pairs)
+        rng.shuffle(shuffled)
+        val_pairs = shuffled[:1]
+        train_pairs = shuffled[1:]
+
+    return train_pairs, val_pairs
 
 
 class ConversationDataset(Dataset):
@@ -225,12 +292,11 @@ def main() -> None:
     )
     pairs = deduplicate_pairs(conversation_pairs + instruction_pairs)
 
-    shuffled = list(pairs)
-    random.shuffle(shuffled)
-    val_count = max(1, int(round(len(shuffled) * args.validation_ratio)))
-    val_count = min(val_count, len(shuffled) - 1)
-    val_pairs = shuffled[:val_count]
-    train_pairs = shuffled[val_count:]
+    train_pairs, val_pairs = stratified_split(
+        pairs,
+        validation_ratio=args.validation_ratio,
+        seed=SEED,
+    )
 
     train_set = ConversationDataset(
         train_pairs, tokenizer, model.context_length
@@ -271,6 +337,7 @@ def main() -> None:
     print("Combined unique   :", len(pairs))
     print("Train pairs       :", len(train_pairs))
     print("Validation pairs  :", len(val_pairs))
+    print("Validation split  :", "intent-stratified")
     print("Context length    :", model.context_length)
     print("Parameters        :", f"{model.parameter_count:,}")
     print("Learning rate     :", args.learning_rate)
