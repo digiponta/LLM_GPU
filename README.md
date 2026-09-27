@@ -403,3 +403,198 @@ use a lower default temperature, and apply repetition penalty only to tokens
 already generated in the answer. This is especially important for questions
 such as "GPUとは何ですか", because prompt words are no longer penalized when
 the answer needs to reuse them.
+
+
+---
+
+## v0.6: Larger Conversational Model
+
+v0.6 is the next experiment after the v0.5 conversational evaluation showed
+that the 0.75M-parameter / context-64 model did not generalize reliably.
+
+The v0.6 pipeline is:
+
+```text
+             general-ja + data-nagato
+                       70%
+                         \
+conversation-ja 20% ---> Mixed Pretraining ---> v0.6 pretrained model
+                         /
+instruction-ja 10% -----+
+                                |
+                                v
+                    Assistant-only SFT
+                                |
+                                v
+                    model-gpu-v0.6-chat.pt
+                         /              \
+                        v                v
+                    chat.py      evaluate_chat.py
+```
+
+### v0.6 architecture
+
+```text
+Vocabulary           : built from all mixed-training sources
+d_model              : 128
+Transformer layers   : 4
+Attention heads      : 4
+FFN dimension        : 512
+Context length       : 256
+Positional encoding  : learned positional embedding
+Parameter scale      : approximately 2M+ (depends on vocabulary size)
+```
+
+The v0.6 model adds true multi-head causal attention and learned positional
+embeddings. Older v0.4/v0.5 checkpoints remain readable because missing
+`num_heads` and positional-embedding settings default to the legacy behavior.
+
+### New files
+
+```text
+train_mixed.py          v0.6 70/20/10 mixed pretraining
+train_sft_v06.py        v0.6 assistant-answer-only SFT
+data/instruction-ja.txt compact Japanese instruction / QA corpus
+```
+
+The existing `chat.py` and `evaluate_chat.py` use the v0.6 tokenizer and
+chat checkpoint by default on this branch.
+
+### Stage 1: mixed pretraining
+
+Required local corpora:
+
+```text
+data/general-ja.txt      or ../LLM/data/general-ja.txt
+data/data-nagato.txt     or ../LLM/data/data-nagato.txt
+data/conversation-ja.txt
+data/instruction-ja.txt
+```
+
+Run:
+
+```powershell
+python train_mixed.py
+```
+
+Default configuration:
+
+```text
+mixture          : 70% general / 20% conversation / 10% instruction
+samples          : 500,000
+context          : 256
+epochs           : 1
+batch size       : 32
+learning rate    : 3e-4
+token exposures  : about 128M
+```
+
+Outputs:
+
+```text
+model/tokenizer-v0.6.json
+model/model-gpu-v0.6-pretrain.pt
+```
+
+For a shorter first smoke test:
+
+```powershell
+python train_mixed.py --samples 20000
+```
+
+For a larger run:
+
+```powershell
+python train_mixed.py --samples 1000000 --epochs 1
+```
+
+### Stage 2: conversational SFT
+
+After mixed pretraining:
+
+```powershell
+python train_sft_v06.py
+```
+
+Default SFT configuration:
+
+```text
+base checkpoint  : model/model-gpu-v0.6-pretrain.pt
+tokenizer        : model/tokenizer-v0.6.json
+context          : inherited from model (256)
+epochs maximum   : 30
+batch size       : 16
+learning rate    : 2e-5
+validation split : 15%
+early stopping   : patience 5
+```
+
+The SFT loss is calculated only for assistant answer tokens:
+
+```text
+人: <user prompt>     -> masked from loss
+AI: <assistant reply> -> optimized by cross entropy
+```
+
+Output:
+
+```text
+model/model-gpu-v0.6-chat.pt
+```
+
+### Stage 3: evaluation and chat
+
+Evaluate first:
+
+```powershell
+python evaluate_chat.py
+```
+
+Then interact:
+
+```powershell
+python chat.py
+```
+
+The v0.6 chat defaults are less restrictive than v0.5 because the model has a
+larger context and greater capacity:
+
+```text
+max new tokens     : 96
+temperature        : 0.45
+top-k              : 20
+history turns      : 3
+repetition penalty : 1.05
+```
+
+### Recommended experimental sequence
+
+Do not start with the full mixed-pretraining run. First verify the complete
+pipeline:
+
+```powershell
+python train_mixed.py --samples 20000
+python train_sft_v06.py
+python evaluate_chat.py
+python chat.py
+```
+
+If the pipeline works correctly, delete or overwrite the smoke-test v0.6
+checkpoints by running the normal mixed-pretraining command:
+
+```powershell
+python train_mixed.py
+python train_sft_v06.py
+python evaluate_chat.py
+```
+
+This provides a direct experimental comparison:
+
+```text
+v0.5
+~0.75M params / context 64 / 1 head
+                  versus
+v0.6
+~2M+ params / context 256 / 4 heads / positional embedding
+/ mixed pretraining / assistant-only SFT
+```
