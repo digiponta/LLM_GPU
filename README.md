@@ -7580,3 +7580,102 @@ Primary success criteria:
 7. No broad GPU/Transformer leakage into topic/repeat/end/compare prompts.
 ```
 
+### v0.10.6: Selective Alignment + Boundary Replay
+
+v0.10.5 restored most of the nontechnical behavior lost in v0.10.4:
+
+```text
+Semantic-content : 26/30
+Strict composite : 26/30
+Fluency          : 30/30
+Direct entity    : 4/6
+Corrected strict : 25/30
+```
+
+The remaining failures are concentrated in already-known boundary cases:
+CPU reverse identification (G05), Transformer completion (G08), Python/CUDA
+separation (G10), short-control behavior (G12), and CPU/GPU direct selection
+(G28).
+
+v0.10.6 deliberately keeps the v0.10.5 architecture and optimization settings
+unchanged. The controlled change is training data only:
+
+```text
+Targeted Boundary v1       : ON
+Targeted Boundary v2       : ON
+Protected Boundary Replay  : ON
+Balanced Control Replay    : OFF
+```
+
+The existing Boundary v2 data specifically reinforces:
+- CPU reverse-identification from "central/diverse instruction" descriptions.
+- Complete Transformer identification from Attention descriptions.
+- short vs repeat control separation.
+- end vs topic control separation.
+
+Protected replay reinforces:
+- Python vs CUDA category separation.
+- CPU/GPU relation selection.
+- topic/end capabilities that should not regress.
+
+Selective alignment remains gated exactly as in v0.10.5:
+technical-tag rows receive entity/global/continuation alignment unless blocked
+by control/debug/research tags. Nontechnical rows receive LM + semantic
+consistency only.
+
+Unchanged optimization settings:
+
+```text
+Consistency weight       : 0.50
+LM Head LR               : 3e-6
+Blocks 4-6 LR            : 1e-5
+Projection LR            : 1e-3
+Consistency-head LR      : 1e-3
+
+Entity alignment weight  : 0.05
+Entity alignment margin  : 0.75
+Global alignment weight  : 0.02
+Global alignment margin  : 0.50
+Continuation weight      : 0.02
+Continuation tokens      : 4
+Alignment confidence     : 0.70
+```
+
+New files:
+
+```text
+train_selective_boundary_replay_v0106.py
+evaluate_selective_boundary_replay_v0106.py
+run_selective_boundary_replay_v0106.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v0.10.6
+git pull origin v0.10.6
+
+python run_selective_boundary_replay_v0106.py
+```
+
+Outputs:
+
+```text
+model/model-gpu-v0.10.6-selective-boundary-replay.pt
+results/selective_boundary_replay_v0106/train.log
+results/selective_boundary_replay_v0106/evaluation.log
+```
+
+Primary success criteria:
+
+```text
+1. G05 moves to direct CPU generation.
+2. G08 keeps direct Transformer and improves semantic completion.
+3. G10 stops mixing Python with CUDA.
+4. G12 short-control behavior recovers.
+5. G28 begins with CPU while preserving semantic correctness.
+6. Nontechnical G13-G22 behavior remains recovered.
+7. Corrected strict score reaches or exceeds 27/30.
+```
+
