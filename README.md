@@ -6484,3 +6484,86 @@ If CPU/GPU paraphrase generation recovers under the NEW projection:
 If G05 intent remains GPU/error-dominant and generation remains wrong:
   -> further intent-head boundary work is still required after realignment.
 ```
+### v0.9.4 Strong Intent -> Generation Coupling
+
+v0.9.3 showed that simply retraining the same weak additive projection does not
+change generation. v0.9.4 therefore changes the coupling architecture itself.
+
+Architecture:
+
+```text
+v0.9.2 intent probabilities (24)
+          |
+          v
+Linear 24 -> 64 -> GELU -> Linear 64 -> 512
+          |
+          +--> gamma (256)
+          +--> beta  (256)
+          |
+          v
+after Transformer Block 3:
+x' = x * (1 + 0.5*tanh(gamma)) + 0.5*tanh(beta)
+          |
+          v
+Blocks 4-6 -> final norm -> LM head
+```
+
+The v0.8 language model and v0.9.2 corrected intent head remain frozen.
+Only the FiLM coupling is trainable. The final FiLM layer is zero-initialized,
+so the initial model is an exact no-op relative to the frozen base model.
+
+New checkpoint:
+
+```text
+model/model-gpu-v0.9.4-strong-intent-film.pt
+```
+
+New files:
+
+```text
+strong_intent_coupling_v094.py
+train_strong_intent_coupling_v094.py
+evaluate_strong_intent_coupling_v094.py
+run_strong_intent_coupling_v094.py
+```
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_strong_intent_coupling_v094.py
+```
+
+The evaluation includes the fixed 30-case benchmark and focused probes for:
+
+```text
+CPU / GPU direct definitions
+CPU/GPU contrast
+Original G05
+Name-request G05
+implicit CPU/GPU paraphrases
+Transformer
+Python
+debug/error
+```
+
+Log:
+
+```text
+results/strong_intent_coupling_v094/run.log
+```
+
+Interpretation:
+
+```text
+If Transformer/Python/CPU/GPU generation improves while intent probabilities stay fixed:
+  -> the primary bottleneck was weak intent-to-generation coupling.
+
+If intent is correct but FiLM generation is still wrong:
+  -> the frozen base LM/output prior is dominating even stronger hidden modulation.
+
+If G05 intent remains GPU/error-dominant while other technical generation improves:
+  -> coupling is improved, but G05 still requires further intent-boundary work.
+```
