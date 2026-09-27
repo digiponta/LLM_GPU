@@ -826,6 +826,87 @@ TARGETED_BOUNDARY_V2_ROWS: Sequence[Tuple[str, str, str]] = [
 ]
 
 
+# v0.9 Targeted Boundary Training v3 protected replay.
+# These rows protect capabilities that were correct in Boundary v1 but
+# regressed or were at risk in Boundary v2. They are intentionally separate
+# from the boundary-learning rows so the training script can replay them with
+# an independent repeat factor.
+PROTECTED_BOUNDARY_REPLAY_ROWS: Sequence[Tuple[str, str, str]] = [
+    # Python category protection.
+    (
+        "読みやすさと幅広い用途で知られるプログラミング言語を答えてください。",
+        "Pythonです。Pythonは読みやすい文法を持つ汎用プログラミング言語です。",
+        "tech_python",
+    ),
+    (
+        "Pythonはどの種類のものですか。CUDAと混同しないように答えてください。",
+        "Pythonは汎用プログラミング言語です。CUDAはGPU計算技術です。",
+        "tech_python",
+    ),
+    (
+        "CUDAではなく、一般的なソフトウェア記述に使う言語として挙げるなら何ですか。",
+        "Pythonです。Pythonは幅広い用途で使われるプログラミング言語です。",
+        "tech_python",
+    ),
+
+    # GPU/CPU relation protection.
+    (
+        "CPUとGPUを比べると、並列計算を得意とするのはどちらですか。",
+        "GPUです。GPUは並列計算を得意とし、CPUは汎用処理や制御を得意とします。",
+        "tech_gpu",
+    ),
+    (
+        "CPUとGPUを比べると、汎用処理や制御を主に担当するのはどちらですか。",
+        "CPUです。CPUは汎用処理や制御を担当し、GPUは並列計算を得意とします。",
+        "tech_cpu",
+    ),
+    (
+        "大量並列と汎用制御を区別してください。大量並列側の装置は何ですか。",
+        "大量並列側はGPUです。汎用制御側はCPUです。",
+        "tech_gpu",
+    ),
+
+    # Topic protection: switch now, do not end.
+    (
+        "会話は続けたまま、別の話題に切り替えましょう。",
+        "はい。会話を続けながら別の話題に移りましょう。",
+        "control_topic",
+    ),
+    (
+        "ここで終わるのではなく、別のテーマを始めたいです。",
+        "いいですよ。終了せず、別のテーマに移りましょう。",
+        "control_topic",
+    ),
+    (
+        "次回へ持ち越さず、今すぐ話題だけ変えてください。",
+        "はい。今すぐ別の話題へ切り替えましょう。",
+        "control_topic",
+    ),
+
+    # End protection: both immediate stop and continue-later forms.
+    (
+        "今日はここで会話を終えましょう。",
+        "お疲れさまでした。また必要なときにお話ししましょう。",
+        "control_end",
+    ),
+    (
+        "この会話はいったん終了してください。",
+        "はい。ここで終了しましょう。また必要なときに続けましょう。",
+        "control_end",
+    ),
+    (
+        "残りの話は次の機会に続けることにします。",
+        "はい。また次回、続きから始めましょう。",
+        "control_end",
+    ),
+    (
+        "今日はここまでにして、続きは後日にしましょう。",
+        "お疲れさまでした。また後日、続きから始めましょう。",
+        "control_end",
+    ),
+]
+
+
 RELATION_AUGMENT_ROWS: Sequence[Tuple[str, str]] = [
     (
         "CPUとGPUの役割の違いを説明してください。",
@@ -875,6 +956,7 @@ def augment_pairs(
     variants_per_intent: int = 24,
     include_targeted_boundary: bool = False,
     include_targeted_boundary_v2: bool = False,
+    include_protected_boundary_replay: bool = False,
 ) -> List[LabeledPair]:
     """Return deduplicated base + deterministic synthetic multi-label rows."""
     output: List[LabeledPair] = []
@@ -909,6 +991,17 @@ def augment_pairs(
     if include_targeted_boundary_v2:
         for prompt, answer, label in TARGETED_BOUNDARY_V2_ROWS:
             add(prompt, answer, label)
+
+    if include_protected_boundary_replay:
+        for prompt, answer, label in PROTECTED_BOUNDARY_REPLAY_ROWS:
+            key = (prompt.strip(), answer.strip())
+            if key in seen:
+                continue
+            seen.add(key)
+            tags = set(classify_tags(prompt))
+            tags.add(label)
+            tags.add("protected_boundary_replay")
+            output.append((key[0], key[1], tuple(sorted(tags))))
 
     for prompt, answer in RELATION_AUGMENT_ROWS:
         add(prompt, answer)
