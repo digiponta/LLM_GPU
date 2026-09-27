@@ -6293,3 +6293,53 @@ If the direct CPU definition is corrected but G05 still fails, return to the
 v0.12.2 semantic/entity path. If even the corrected projection still maps
 `CPUとは` to the GPU definition, the remaining prior is inside the frozen v0.8
 base model and a base/SFT retraining experiment is justified.
+### G05 Re-evaluation after CPU Definition Correction
+
+This no-training diagnostic re-evaluates G05 using the corrected v0.9.1
+CPU-definition projection checkpoint under deterministic single-turn conditions.
+
+Generation settings:
+
+```text
+temperature = 0
+history turns = 0
+```
+
+Probes include:
+
+```text
+CPUとは
+CPUとは何ですか
+GPUとは
+CPUとGPUの違いは
+Original G05
+Name-request G05
+```
+
+For each probe, the evaluator prints the generated reply, a simple CPU/GPU-like
+classification, token count, and the top five frozen v0.8 intent probabilities.
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_g05_after_cpu_definition_v091.py
+```
+
+Log:
+
+```text
+results/g05_after_cpu_definition_v091/evaluation.log
+```
+
+Interpretation:
+
+```text
+If direct CPU/GPU definitions are correct and G05 is also CPU-like:
+  -> the earlier G05 failure was largely caused by CPU-definition training bias.
+
+If direct CPU/GPU definitions are correct but G05 remains GPU-like:
+  -> the residual problem lies in intent/semantic-to-generation routing for the G05 wording.
+```
