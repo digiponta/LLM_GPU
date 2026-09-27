@@ -91,7 +91,11 @@ def main() -> None:
             f"{tokenizer.vocab_size} != {model.vocab_size}"
         )
 
-    text = data_path.read_text(encoding="utf-8")
+    raw_text = data_path.read_text(encoding="utf-8")
+    text = "\n".join(
+        line for line in raw_text.splitlines()
+        if not line.lstrip().startswith("#")
+    ).strip() + "\n"
     token_ids = tokenizer.encode(text, add_bos=True, add_eos=True)
     unknown_count = sum(token_id == tokenizer.unk_id for token_id in token_ids)
     unknown_rate = unknown_count / max(1, len(token_ids))
