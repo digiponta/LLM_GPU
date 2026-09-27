@@ -156,3 +156,24 @@
 
 質問: CPUとGPUの役割を対比してください。
 回答: CPUは汎用処理と制御、GPUは大量の並列計算を主に担当します。
+
+# v0.9.1 CPU/GPU definition symmetry correction.
+# Short CPU definition prompts mirror the strong GPU definition examples.
+
+質問: CPUとは何ですか。
+回答: CPUは多様な命令を実行し、コンピュータ全体の汎用処理や制御を担当する演算装置です。
+
+質問: CPUとは。
+回答: CPUは汎用的な命令実行と制御処理を担当する中央処理装置です。
+
+質問: CPUを簡単に説明してください。
+回答: CPUは多様な命令を実行し、汎用処理を担当するプロセッサです。
+
+質問: CPUの定義を答えてください。
+回答: CPUはCentral Processing Unitの略で、汎用処理と制御を担う中央処理装置です。
+
+質問: Central Processing Unitとは何ですか。
+回答: CPUの正式名称で、コンピュータの汎用処理や制御を担当する中央処理装置です。
+
+質問: CPUは並列計算を主に行う装置ですか。
+回答: いいえ。CPUは多様な命令の実行や汎用的な制御処理を主に担当し、大量の同種並列計算はGPUが得意です。
