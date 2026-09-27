@@ -11,7 +11,7 @@ from typing import Dict, Iterable, List, Sequence, Tuple
 
 
 Pair = Tuple[str, str]
-LabeledPair = Tuple[str, str, str]
+LabeledPair = Tuple[str, str, Tuple[str, ...]]
 
 
 INTENT_LABELS = [
@@ -31,54 +31,94 @@ INTENT_LABELS = [
     "fatigue",
     "thanks",
     "capital",
+    "relation_compare",
+    "relation_distinction",
+    "relation_usage",
+    "property_parallel",
+    "property_general",
+    "property_language",
+    "property_attention",
     "other",
 ]
 
 
-def classify_intent(text: str) -> str:
+def classify_tags(text: str) -> Tuple[str, ...]:
     upper = text.upper()
+    tags = set()
 
-    # Contrast prompts are assigned by their requested focus when obvious.
-    if "GPU" in upper and "CPU" not in upper:
-        return "tech_gpu"
-    if "CPU" in upper and "GPU" not in upper:
-        return "tech_cpu"
-    if "LLM" in upper and "TRANSFORMER" not in upper:
-        return "tech_llm"
-    if "TRANSFORMER" in upper and "LLM" not in upper:
-        return "tech_transformer"
-    if "CUDA" in upper and "PYTHON" not in upper:
-        return "tech_cuda"
-    if "PYTHON" in upper and "CUDA" not in upper:
-        return "tech_python"
+    if "GPU" in upper:
+        tags.add("tech_gpu")
+    if "CPU" in upper:
+        tags.add("tech_cpu")
+    if "LLM" in upper:
+        tags.add("tech_llm")
+    if "TRANSFORMER" in upper:
+        tags.add("tech_transformer")
+    if "CUDA" in upper:
+        tags.add("tech_cuda")
+    if "PYTHON" in upper:
+        tags.add("tech_python")
 
     rules = [
         ("control_short", ("短く", "簡潔", "要点", "一言")),
-        ("control_topic", ("話題", "別の話", "違う話", "テーマ")),
-        ("control_repeat", ("もう一度", "分かりやす", "説明", "言い方")),
-        ("control_end", ("ここまで", "終わり", "終わります", "次回")),
-        ("debug_error", ("エラー", "動かない", "失敗", "不具合")),
-        ("research_compare", ("比較", "比べ", "実験結果", "モデルA", "モデルB")),
-        ("greeting", ("こんにちは", "おはよう", "こんばんは", "元気", "調子")),
-        ("fatigue", ("疲れ", "眠い", "休みたい")),
+        ("control_topic", ("話題", "別の話", "違う話", "テーマ", "別件")),
+        ("control_repeat", ("もう一度", "分かりやす", "説明", "言い方", "理解でき")),
+        ("control_end", ("ここまで", "終わり", "終わります", "終了", "次回", "続きは")),
+        ("debug_error", ("エラー", "動かない", "失敗", "不具合", "原因")),
+        ("research_compare", ("比較", "比べ", "実験結果", "モデルA", "モデルB", "差を")),
+        ("greeting", ("こんにちは", "おはよう", "こんばんは", "元気", "調子", "やあ")),
+        ("fatigue", ("疲れ", "眠い", "休みたい", "休憩したい")),
         ("thanks", ("ありがとう", "感謝", "助かり")),
         ("capital", ("首都", "東京", "政府の中心")),
     ]
     for label, keys in rules:
         if any(key in text for key in keys):
+            tags.add(label)
+
+    if (
+        ("GPU" in upper and "CPU" in upper)
+        or ("LLM" in upper and "TRANSFORMER" in upper)
+        or ("PYTHON" in upper and "CUDA" in upper)
+    ):
+        tags.add("relation_compare")
+
+    if any(key in text for key in ("同じ", "違い", "混同", "区別", "どちら")):
+        tags.add("relation_distinction")
+
+    if any(key in text for key in ("何に使", "用途", "利用", "役割", "仕事")):
+        tags.add("relation_usage")
+
+    if any(key in text for key in ("並列", "同時", "大量", "高速化")):
+        tags.add("property_parallel")
+
+    if any(key in text for key in ("汎用", "命令", "制御", "逐次")):
+        tags.add("property_general")
+
+    if any(key in text for key in ("言語", "文章", "プログラミング")):
+        tags.add("property_language")
+
+    if "ATTENTION" in upper or "Attention" in text:
+        tags.add("property_attention")
+
+    if not tags:
+        tags.add("other")
+
+    return tuple(sorted(tags))
+
+
+def classify_intent(text: str) -> str:
+    """Backward-compatible primary label for diagnostics/splitting."""
+    tags = classify_tags(text)
+    priority = [
+        "tech_gpu", "tech_cpu", "tech_llm", "tech_transformer",
+        "tech_cuda", "tech_python", "control_short", "control_topic",
+        "control_repeat", "control_end", "debug_error",
+        "research_compare", "greeting", "fatigue", "thanks", "capital",
+    ]
+    for label in priority:
+        if label in tags:
             return label
-
-    # Mixed contrast questions are useful but should not dominate one class.
-    if "GPU" in upper and "CPU" in upper:
-        return "tech_gpu"
-    if "LLM" in upper and "TRANSFORMER" in upper:
-        return "tech_llm"
-    if "CUDA" in upper and "GPU" in upper:
-        return "tech_cuda"
-    if "PYTHON" in upper and "CUDA" in upper:
-        return "tech_python"
-
-    return "other"
+    return tags[0]
 
 
 AUGMENT_BANK: Dict[str, Dict[str, Sequence[str]]] = {
@@ -294,19 +334,22 @@ def augment_pairs(
     base_pairs: Sequence[Pair],
     variants_per_intent: int = 24,
 ) -> List[LabeledPair]:
-    """Return deduplicated base + deterministic synthetic paraphrase pairs."""
+    """Return deduplicated base + deterministic synthetic multi-label rows."""
     output: List[LabeledPair] = []
     seen = set()
 
-    def add(prompt: str, answer: str, label: str) -> None:
+    def add(prompt: str, answer: str, seed_label: str = "") -> None:
         key = (prompt.strip(), answer.strip())
         if not prompt.strip() or not answer.strip() or key in seen:
             return
         seen.add(key)
-        output.append((key[0], key[1], label))
+        tags = set(classify_tags(prompt))
+        if seed_label:
+            tags.add(seed_label)
+        output.append((key[0], key[1], tuple(sorted(tags))))
 
     for prompt, answer in base_pairs:
-        add(prompt, answer, classify_intent(prompt))
+        add(prompt, answer)
 
     for label, bank in AUGMENT_BANK.items():
         prompts = list(bank["prompts"])
@@ -314,8 +357,6 @@ def augment_pairs(
         if not prompts or not answers:
             continue
 
-        # Cycle answers across prompt templates. Repeated passes add controlled
-        # punctuation/politeness variants rather than copying the held-out set.
         count = max(len(prompts), int(variants_per_intent))
         suffixes = ["", "。", "お願いします。", "教えてください。"]
         for i in range(count):
@@ -329,7 +370,6 @@ def augment_pairs(
 
     return output
 
-
 def intent_vocabulary(rows: Iterable[LabeledPair]) -> List[str]:
-    labels = sorted({label for _, _, label in rows})
+    labels = sorted({label for _, _, tags in rows for label in tags})
     return labels
