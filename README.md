@@ -1291,3 +1291,80 @@ python train_sft_v08.py --technical-repeat 3
 
 `1` disables technical oversampling; `3` is the default.
 
+### v0.8 multidimensional generalization evaluation
+
+The fixed 30-case generalization benchmark now separates several failure modes
+instead of collapsing every case into one PASS/MISS result.
+
+For each reply, the evaluator reports:
+
+```text
+semantic-content
+entity
+fluency
+strict
+```
+
+Definitions:
+
+```text
+semantic-content
+  Checks the answer's required meaning while allowing a concept name to be
+  omitted when that same concept is already explicit in the user prompt.
+
+entity
+  Checks whether prompt-mentioned technical entities are explicitly repeated
+  in the answer. This distinguishes "the meaning is correct but the name was
+  omitted" from a true semantic error.
+
+fluency
+  Flags obvious surface corruption such as replacement characters, long
+  malformed ASCII fragments, underscore noise, and repeated fragments.
+  It is intentionally conservative and is not a general grammar judge.
+
+strict
+  PASS only when semantic-content, entity explicitness, and fluency all pass.
+```
+
+The original rule-based score is retained as:
+
+```text
+Legacy rule rate
+```
+
+so older v0.7/v0.8 experiment results remain comparable.
+
+Example:
+
+```text
+Prompt: GPU is suitable for many simultaneous calculations. What is it good at?
+Reply : Large-scale parallel computation.
+
+semantic-content : PASS
+entity           : MISS
+fluency          : PASS
+strict           : MISS
+legacy           : MISS
+```
+
+This avoids treating a concept-name omission as the same failure type as an
+incorrect answer such as confusing GPU with CPU.
+
+Run the evaluator as before:
+
+```powershell
+python evaluate_generalization_v07.py
+```
+
+The summary now reports:
+
+```text
+Semantic-content rate
+Entity-explicit rate
+Fluency rate
+Strict composite rate
+Legacy rule rate
+```
+
+The 30 prompts themselves are unchanged.
+
