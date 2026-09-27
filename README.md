@@ -3442,3 +3442,141 @@ CUDA G09 and acronym/full-name generalization remain separate residual semantic
 issues and are not treated as blockers for this first generation-integration
 experiment.
 
+### v0.9.1 Semantic-to-Generation Interface v0.6
+
+The v0.5 semantic adapter successfully corrected the semantic geometry for G05,
+but the first generation integration still produced a GPU-like answer for G05.
+This shows that the remaining bottleneck is the semantic-to-generation mapping,
+not the semantic encoder.
+
+v0.6 replaces the single fused 271 -> 256 projection with an explicit
+semantic-gated interface.
+
+Frozen semantic source:
+
+```text
+Semantic Adapter v0.5
+  -> adapted hidden
+  -> concept probabilities
+  -> attribute probabilities
+  -> hierarchy probabilities
+```
+
+Explicit gates:
+
+```text
+cpu_general
+gpu_parallel
+transformer_structure
+cuda_platform
+python_language
+llm_language
+```
+
+The main CPU/GPU gates are defined from both concept identity and hierarchy:
+
+```text
+CPU gate
+  = P(CPU)
+    * mean(general_purpose, control_oriented)
+
+GPU gate
+  = P(GPU)
+    * mean(
+        throughput_oriented,
+        data_parallel,
+        property_parallel
+      )
+```
+
+Transformer uses both identity and structural evidence:
+
+```text
+Transformer gate
+  = P(Transformer)
+    * property_attention_structure
+```
+
+Generation interface:
+
+```text
+adapted hidden (256)
+  -> semantic projection (256 -> 256)
+                             \
+                              + -> alpha -> inject after Block 3
+                             /
+semantic gates (6)
+  -> gate projection (6 -> 256)
+```
+
+Both projections are zero-initialized, so the interface starts as a no-op.
+
+Training policy:
+
+```text
+semantic encoder       : frozen
+semantic adapter v0.5  : frozen
+semantic heads         : frozen
+hierarchy head         : frozen
+
+generation Blocks 1-3  : frozen
+generation Blocks 4-6  : trainable
+FinalNorm              : trainable
+LM Head                : frozen
+
+Boundary data          : v1 only
+projection LR          : 1e-3
+block LR               : 1e-5
+alpha                  : 0.1
+gate alpha             : 1.0
+```
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_semantic_generation_gate_v091.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v0.9.1-semantic-gated-v06.pt
+```
+
+Logs:
+
+```text
+results/semantic_generation_gate_v091/train.log
+results/semantic_generation_gate_v091/eval.log
+```
+
+The evaluator prints explicit gate values for G05, G08 and G09.
+
+Reference before v0.6:
+
+```text
+v0.9 semantic integration:
+Semantic-content : 26/30 = 86.7%
+Strict composite : 25/30 = 83.3%
+
+Residuals:
+G05 CPU          : semantic signal correct, generated answer wrong
+G08 Transformer  : semantic correct, fluency wrong
+G12 short        : miss
+G15 repeat       : miss
+G18 end          : miss
+```
+
+Primary targets:
+
+```text
+G05 CPU gate > GPU gate and CPU answer becomes correct
+G08 remains Transformer-correct and fluency improves
+G09 CUDA remains correct
+Semantic-content >= 26/30
+Strict composite > 25/30 if possible
+```
+
