@@ -4912,3 +4912,84 @@ technical held-out centroid accuracy does not regress
 Only semantic calibration can now fail; structural hierarchy ordering itself is
 not learnable and therefore cannot be violated.
 
+### v0.9.1 Semantic v0.8 -> Original v0.9 Generation Integration
+
+This controlled experiment reconnects the completed hierarchy-constrained
+semantic head to the original v0.9 additive generation interface.
+
+Semantic representation:
+
+```text
+adapted semantic hidden  : 256
+concept probabilities    :   6
+attribute probabilities  :   4
+constrained hierarchy    :  15
+                         ----
+total                    : 281
+```
+
+Generation interface:
+
+```text
+281
+ -> Linear(281 -> 256), zero initialized
+ -> alpha = 0.1
+ -> inject after Block 3
+ -> Blocks 4-6
+ -> FinalNorm
+ -> frozen LM Head
+```
+
+Controlled training policy:
+
+```text
+semantic encoder/head    : frozen
+Blocks 1-3               : frozen
+Blocks 4-6               : trainable
+FinalNorm                 : trainable
+LM Head                   : frozen
+Boundary data             : v1 only
+projection LR             : 1e-3
+block LR                  : 1e-5
+```
+
+The purpose is to isolate the effect of the constrained semantic ontology.
+The generation architecture is otherwise kept equivalent to the prior v0.9
+additive integration experiment.
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_semantic_generation_v08.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v0.9.1-semantic-generation-v08.pt
+```
+
+Logs:
+
+```text
+results/semantic_generation_v08/train.log
+results/semantic_generation_v08/eval.log
+```
+
+Primary targets:
+
+```text
+G05 generation -> CPU
+G08 -> Transformer
+G09 -> CUDA
+G28 -> CPU
+semantic >= 26/30
+strict >= 26/30
+```
+
+The evaluator prints all 15 constrained hierarchy marginals for G05, G08,
+G09 and G28.
+
