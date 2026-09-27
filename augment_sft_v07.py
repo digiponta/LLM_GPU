@@ -79,6 +79,7 @@ def classify_tags(text: str) -> Tuple[str, ...]:
         ("GPU" in upper and "CPU" in upper)
         or ("LLM" in upper and "TRANSFORMER" in upper)
         or ("PYTHON" in upper and "CUDA" in upper)
+        or ("CUDA" in upper and "GPU" in upper)
     ):
         tags.add("relation_compare")
 
@@ -500,6 +501,80 @@ REVERSE_DEFINITION_ROWS: Sequence[Tuple[str, str, str]] = [
 ]
 
 
+
+
+# v0.8 pairwise hard-negative binding.
+# Each pair uses the same question structure with opposite semantic properties.
+# The model must choose the correct concept and bind it to the correct property.
+PAIRWISE_HARD_NEGATIVE_ROWS: Sequence[Tuple[str, str, str]] = [
+    # GPU <-> CPU
+    (
+        "CPUとGPUのうち、大量の同種計算を並列に処理する側を選び、理由も答えてください。",
+        "GPUです。GPUは大量の同種計算を並列に処理することを得意とします。",
+        "tech_gpu",
+    ),
+    (
+        "CPUとGPUのうち、多様な命令実行や汎用制御を主に担当する側を選び、理由も答えてください。",
+        "CPUです。CPUは多様な命令実行や汎用処理、制御を担当します。",
+        "tech_cpu",
+    ),
+    (
+        "並列計算の得意な装置としてCPUとGPUのどちらを選びますか。もう一方との違いも短く答えてください。",
+        "GPUです。GPUは並列計算を得意とし、CPUは汎用処理や制御を得意とします。",
+        "tech_gpu",
+    ),
+    (
+        "汎用処理の中心となる装置としてCPUとGPUのどちらを選びますか。もう一方との違いも短く答えてください。",
+        "CPUです。CPUは汎用処理や制御を担当し、GPUは大量の並列計算を得意とします。",
+        "tech_cpu",
+    ),
+
+    # Transformer <-> CUDA
+    (
+        "TransformerとCUDAのうち、Attentionを中心に情報関係を処理するモデル構造はどちらですか。",
+        "Transformerです。TransformerはAttentionを中心に情報関係を処理するモデル構造です。",
+        "tech_transformer",
+    ),
+    (
+        "TransformerとCUDAのうち、NVIDIA GPUを汎用計算に利用するための技術はどちらですか。",
+        "CUDAです。CUDAはNVIDIA GPUを汎用計算に利用するための技術です。",
+        "tech_cuda",
+    ),
+    (
+        "Attentionという特徴に対応するのはTransformerとCUDAのどちらですか。理由も答えてください。",
+        "Transformerです。AttentionはTransformerの中心的な仕組みです。",
+        "tech_transformer",
+    ),
+    (
+        "NVIDIA GPU向け計算基盤という特徴に対応するのはTransformerとCUDAのどちらですか。理由も答えてください。",
+        "CUDAです。CUDAはNVIDIA GPU向けの汎用計算基盤です。",
+        "tech_cuda",
+    ),
+
+    # CUDA <-> Python
+    (
+        "CUDAとPythonのうち、NVIDIA GPUで汎用計算を行うための技術はどちらですか。",
+        "CUDAです。CUDAはNVIDIA GPUを汎用計算に利用するための技術です。",
+        "tech_cuda",
+    ),
+    (
+        "CUDAとPythonのうち、読みやすい文法を持つ汎用プログラミング言語はどちらですか。",
+        "Pythonです。Pythonは読みやすい文法を持つ汎用プログラミング言語です。",
+        "tech_python",
+    ),
+    (
+        "GPU計算技術という分類に当てはまるのはCUDAとPythonのどちらですか。もう一方の分類も答えてください。",
+        "CUDAです。CUDAはGPU計算技術で、Pythonはプログラミング言語です。",
+        "tech_cuda",
+    ),
+    (
+        "プログラミング言語という分類に当てはまるのはCUDAとPythonのどちらですか。もう一方の分類も答えてください。",
+        "Pythonです。Pythonはプログラミング言語で、CUDAはGPU計算技術です。",
+        "tech_python",
+    ),
+]
+
+
 RELATION_AUGMENT_ROWS: Sequence[Tuple[str, str]] = [
     (
         "CPUとGPUの役割の違いを説明してください。",
@@ -569,6 +644,9 @@ def augment_pairs(
         add(prompt, answer, label)
 
     for prompt, answer, label in REVERSE_DEFINITION_ROWS:
+        add(prompt, answer, label)
+
+    for prompt, answer, label in PAIRWISE_HARD_NEGATIVE_ROWS:
         add(prompt, answer, label)
 
     for prompt, answer in RELATION_AUGMENT_ROWS:
