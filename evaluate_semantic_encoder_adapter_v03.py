@@ -322,10 +322,10 @@ def main():
     print("Acronym / full-name probe")
     print("-------------------------")
     acronym_cases = [
-        ("CPU full name", "Central Processing Unitを略すと何ですか。", "tech_cpu"),
-        ("CPU meaning", "Central Processing Unitは何を担当する装置ですか。", "tech_cpu"),
-        ("GPU full name", "Graphics Processing Unitを略すと何ですか。", "tech_gpu"),
-        ("GPU meaning", "Graphics Processing Unitはどんな計算を得意としますか。", "tech_gpu"),
+        ("CPU full name", "Central Processing Unitという正式名称に対応する略称は何でしょうか。", "tech_cpu"),
+        ("CPU meaning", "Central Processing Unitが担う代表的な役割を名称とともに考えてください。", "tech_cpu"),
+        ("GPU full name", "Graphics Processing Unitという正式名称の略称を答えてください。", "tech_gpu"),
+        ("GPU meaning", "Graphics Processing Unitの現在の計算上の強みは何でしょうか。", "tech_gpu"),
     ]
     for name, prompt, expected in acronym_cases:
         vector = F.normalize(
