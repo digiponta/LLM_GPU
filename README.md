@@ -7679,3 +7679,80 @@ Primary success criteria:
 7. Corrected strict score reaches or exceeds 27/30.
 ```
 
+### v0.10.7: GPU Template Ablation
+
+v0.10.6 improved several boundary cases, but G05 still generated a memorized
+GPU-like sentence even though the semantic prediction strongly favored CPU.
+
+The suspected generation prior was the repeated training phrase:
+
+```text
+多数の計算を並列に処理する...
+```
+
+v0.10.7 is a controlled data ablation. Architecture, losses, learning rates,
+selective gating, Targeted Boundary v2, and Protected Boundary Replay are kept
+unchanged from v0.10.6. The only intended change is wording in the training
+sources.
+
+The token/word `多数` is removed from all three active training sources:
+
+```text
+data/conversation-ja.txt
+data/instruction-ja.txt
+augment_sft_v07.py
+```
+
+Representative rewrites:
+
+```text
+多数の計算を並列に処理する
+  -> 同種の計算を並列に処理する
+
+GPUは多数の計算を同時並行で処理する
+  -> GPUは同種の計算を同時並行で処理する
+
+多数の演算を同時に進める
+  -> 多くの演算を同時に進める
+
+多数の異なる命令を扱う
+  -> さまざまな命令を扱う
+```
+
+The purpose is to test whether G05 is caused mainly by an overlearned lexical
+GPU template rather than by semantic recognition itself.
+
+New files:
+
+```text
+train_gpu_template_ablation_v0107.py
+evaluate_gpu_template_ablation_v0107.py
+run_gpu_template_ablation_v0107.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v0.10.7
+git pull origin v0.10.7
+
+python run_gpu_template_ablation_v0107.py
+```
+
+Outputs:
+
+```text
+model/model-gpu-v0.10.7-gpu-template-ablation.pt
+results/gpu_template_ablation_v0107/train.log
+results/gpu_template_ablation_v0107/evaluation.log
+```
+
+Primary success criterion:
+
+```text
+If G05 changes from the memorized GPU-like answer toward CPU while the
+semantic prediction remains CPU, this supports the hypothesis that the
+failure was driven by lexical/template bias in the training corpus.
+```
+
