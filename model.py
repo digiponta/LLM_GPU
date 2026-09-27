@@ -1,6 +1,11 @@
 # model.py
 #
-# CUDA/PyTorch implementation of the homemade v0.3 Transformer LM.
+# CUDA/PyTorch Transformer language model.
+#
+# v0.6 additions:
+#   - configurable multi-head causal self-attention
+#   - optional learned positional embeddings
+#   - backward-compatible loading of older single-head checkpoints
 
 from __future__ import annotations
 
@@ -14,11 +19,20 @@ import torch.nn.functional as F
 
 
 class SelfAttention(nn.Module):
-    """Single-head causal self-attention, matching the original v0.3 design."""
-
-    def __init__(self, d_model: int, causal: bool = True):
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int = 1,
+        causal: bool = True,
+    ):
         super().__init__()
+
+        if d_model % num_heads != 0:
+            raise ValueError("d_model must be divisible by num_heads.")
+
         self.d_model = d_model
+        self.num_heads = num_heads
+        self.head_dim = d_model // num_heads
         self.causal = causal
 
         self.q_proj = nn.Linear(d_model, d_model, bias=False)
@@ -26,17 +40,22 @@ class SelfAttention(nn.Module):
         self.v_proj = nn.Linear(d_model, d_model, bias=False)
         self.out_proj = nn.Linear(d_model, d_model, bias=False)
 
+    def _split_heads(self, x: torch.Tensor) -> torch.Tensor:
+        batch, time, _ = x.shape
+        x = x.view(batch, time, self.num_heads, self.head_dim)
+        return x.transpose(1, 2)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: [batch, time, d_model]
-        q = self.q_proj(x)
-        k = self.k_proj(x)
-        v = self.v_proj(x)
+        batch, time, _ = x.shape
+
+        q = self._split_heads(self.q_proj(x))
+        k = self._split_heads(self.k_proj(x))
+        v = self._split_heads(self.v_proj(x))
 
         scores = torch.matmul(q, k.transpose(-2, -1))
-        scores = scores / math.sqrt(float(self.d_model))
+        scores = scores / math.sqrt(float(self.head_dim))
 
         if self.causal:
-            time = x.size(1)
             mask = torch.triu(
                 torch.ones(
                     (time, time),
@@ -49,6 +68,8 @@ class SelfAttention(nn.Module):
 
         weights = F.softmax(scores, dim=-1)
         context = torch.matmul(weights, v)
+        context = context.transpose(1, 2).contiguous()
+        context = context.view(batch, time, self.d_model)
         return self.out_proj(context)
 
 
@@ -67,11 +88,16 @@ class TransformerBlock(nn.Module):
         self,
         d_model: int,
         hidden_dim: int,
+        num_heads: int = 1,
         causal: bool = True,
     ):
         super().__init__()
         self.norm1 = nn.LayerNorm(d_model)
-        self.attention = SelfAttention(d_model, causal=causal)
+        self.attention = SelfAttention(
+            d_model=d_model,
+            num_heads=num_heads,
+            causal=causal,
+        )
         self.norm2 = nn.LayerNorm(d_model)
         self.ffn = FeedForward(d_model, hidden_dim)
 
@@ -88,8 +114,10 @@ class LanguageModel(nn.Module):
         d_model: int = 64,
         num_layers: int = 2,
         hidden_dim: int = 256,
+        num_heads: int = 1,
         causal: bool = True,
         context_length: int = 64,
+        use_position_embedding: bool = False,
     ):
         super().__init__()
 
@@ -97,6 +125,10 @@ class LanguageModel(nn.Module):
             raise ValueError("vocab_size must be > 0.")
         if d_model <= 0 or num_layers <= 0 or hidden_dim <= 0:
             raise ValueError("Model dimensions must be > 0.")
+        if num_heads <= 0:
+            raise ValueError("num_heads must be > 0.")
+        if d_model % num_heads != 0:
+            raise ValueError("d_model must be divisible by num_heads.")
         if context_length <= 0:
             raise ValueError("context_length must be > 0.")
 
@@ -104,15 +136,22 @@ class LanguageModel(nn.Module):
         self.d_model = d_model
         self.num_layers = num_layers
         self.hidden_dim = hidden_dim
+        self.num_heads = num_heads
         self.causal = causal
         self.context_length = context_length
+        self.use_position_embedding = use_position_embedding
 
         self.embedding = nn.Embedding(vocab_size, d_model)
+        if use_position_embedding:
+            self.position_embedding = nn.Embedding(context_length, d_model)
+        else:
+            self.position_embedding = None
 
         self.blocks = nn.ModuleList([
             TransformerBlock(
                 d_model=d_model,
                 hidden_dim=hidden_dim,
+                num_heads=num_heads,
                 causal=causal,
             )
             for _ in range(num_layers)
@@ -141,18 +180,32 @@ class LanguageModel(nn.Module):
             "d_model": self.d_model,
             "num_layers": self.num_layers,
             "hidden_dim": self.hidden_dim,
+            "num_heads": self.num_heads,
             "causal": self.causal,
             "context_length": self.context_length,
+            "use_position_embedding": self.use_position_embedding,
         }
 
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
-        # token_ids: [batch, time]
         if token_ids.dim() != 2:
             raise ValueError("token_ids must have shape [batch, time].")
 
+        batch, time = token_ids.shape
+        if time > self.context_length:
+            raise ValueError(
+                f"Sequence length {time} exceeds context length "
+                f"{self.context_length}."
+            )
+
         x = self.embedding(token_ids)
+
+        if self.position_embedding is not None:
+            positions = torch.arange(time, device=token_ids.device)
+            x = x + self.position_embedding(positions).unsqueeze(0)
+
         for block in self.blocks:
             x = block(x)
+
         x = self.final_norm(x)
         return self.lm_head(x)
 
@@ -171,7 +224,7 @@ class LanguageModel(nn.Module):
         path.parent.mkdir(parents=True, exist_ok=True)
 
         checkpoint = {
-            "format": "homemade-llm-gpu-v0.3",
+            "format": "homemade-llm-gpu-v0.6",
             "config": self.config(),
             "model_state_dict": self.state_dict(),
             "epoch": epoch,
@@ -196,8 +249,12 @@ class LanguageModel(nn.Module):
             d_model=int(config["d_model"]),
             num_layers=int(config["num_layers"]),
             hidden_dim=int(config["hidden_dim"]),
+            num_heads=int(config.get("num_heads", 1)),
             causal=bool(config.get("causal", True)),
             context_length=int(config.get("context_length", 64)),
+            use_position_embedding=bool(
+                config.get("use_position_embedding", False)
+            ),
         )
         model.load_state_dict(checkpoint["model_state_dict"])
         model.to(device)
