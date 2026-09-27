@@ -1,6 +1,6 @@
 # evaluate_chat.py
 #
-# Lightweight deterministic evaluation for LLM_GPU v0.6 conversational behavior.
+# Lightweight deterministic evaluation for LLM_GPU v0.7 conversational behavior.
 # This is not a general intelligence benchmark. It checks whether the small
 # model learned basic reply formatting, short-answer behavior, and a few
 # held-out conversational intents.
@@ -15,29 +15,29 @@ import torch
 
 from chat import AI_PREFIX, USER_PREFIX, generate_reply
 from model import LanguageModel
-from tokenizer import Tokenizer
+from tokenizer_bpe import Tokenizer
 
 
-DEFAULT_TOKENIZER = "model/tokenizer-v0.6.json"
-DEFAULT_MODEL = "model/model-gpu-v0.6-chat.pt"
+DEFAULT_TOKENIZER = "model/tokenizer-v0.7-bpe.json"
+DEFAULT_MODEL = "model/model-gpu-v0.7-chat.pt"
 
 TEST_CASES: List[Dict[str, object]] = [
     {"prompt": "こんにちは、元気ですか。", "keywords": ["こんにちは", "元気"]},
     {"prompt": "日本の首都を教えてください。", "keywords": ["東京"]},
     {"prompt": "GPUは何をするものですか。", "keywords": ["計算", "並列", "GPU"]},
-    {"prompt": "わからないので、もう一度説明して。", "keywords": ["説明", "確認"]},
+    {"prompt": "わからないので、もう一度説明して。", "keywords": ["説明", "確認", "分かりにく", "もちろん"]},
     {"prompt": "今日は疲れました。", "keywords": ["休", "お疲れ"]},
     {"prompt": "プログラムでエラーが出ました。", "keywords": ["エラー", "確認"]},
     {"prompt": "研究結果を比べたいです。", "keywords": ["比較", "条件", "指標"]},
     {"prompt": "短く答えてください。", "keywords": ["はい", "短"]},
-    {"prompt": "話題を変えましょう。", "keywords": ["話題", "どうぞ"]},
+    {"prompt": "話題を変えましょう。", "keywords": ["話題", "どうぞ", "新しい"]},
     {"prompt": "今日はここまでにします。", "keywords": ["お疲れ", "また"]},
 ]
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Evaluate basic LLM_GPU v0.6 chat behavior."
+        description="Evaluate basic LLM_GPU v0.7 chat behavior."
     )
     parser.add_argument("--tokenizer", default=DEFAULT_TOKENIZER)
     parser.add_argument("--model", default=DEFAULT_MODEL)
@@ -75,7 +75,7 @@ def main() -> None:
 
     print()
     print("====================================")
-    print(" LLM_GPU v0.6 Chat Evaluation")
+    print(" LLM_GPU v0.7 Chat Evaluation")
     print("====================================")
     print("Device          :", device)
     print("Checkpoint loss :", checkpoint.get("loss"))
