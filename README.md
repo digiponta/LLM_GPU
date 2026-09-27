@@ -291,17 +291,24 @@ python train_corpus.py
 python train_conversation.py
 ```
 
-Default fine-tuning settings:
+Default fine-tuning settings (revised SFT):
 
 ```text
 base checkpoint : model/model-gpu-v0.4.pt
 conversation data: data/conversation-ja.txt
 output checkpoint: model/model-gpu-v0.5-chat.pt
-epochs          : 5
-max samples     : 50,000
-learning rate   : 1e-4
-batch size      : 64
+epochs (maximum): 40
+learning rate   : 5e-5
+batch size      : 16
+validation ratio: 0.15
+early-stop patience: 6
 ```
+
+The revised trainer treats each `人:` / `AI:` pair as one supervised
+training example. Cross-entropy loss is calculated only on the AI answer;
+the user prompt and padding are masked out. This avoids the first v0.5
+implementation's excessive repetition of a tiny continuous corpus, which
+could produce a very low loss while still giving poor conversational replies.
 
 The script keeps the existing tokenizer. It reports the percentage of
 `<UNK>` tokens before training and warns when the conversation corpus contains
@@ -310,7 +317,7 @@ too many characters not represented by the v0.4 vocabulary.
 Parameters can be changed from the command line, for example:
 
 ```powershell
-python train_conversation.py --epochs 3 --max-samples 20000 --learning-rate 5e-5
+python train_conversation.py --epochs 60 --learning-rate 5e-5 --patience 8
 ```
 
 ### Step 3: chat
@@ -366,3 +373,33 @@ If v0.5 learns speaker turn-taking and short responses but factual coverage,
 coherence, or multi-turn memory remain weak, the next bottleneck is likely the
 small model capacity and 64-character context rather than the chat interface
 itself.
+
+
+### v0.5 SFT correction
+
+The initial conversational experiment used a continuous next-character window
+dataset with 50,000 repeated samples. A checkpoint loss near zero could
+therefore indicate memorization rather than useful question-to-answer
+behavior.
+
+The revised implementation uses:
+
+```text
+one dialogue pair
+      |
+      v
+人: <question>
+AI: <answer>
+      |
+      +-- prompt tokens: loss masked
+      |
+      +-- AI answer tokens: loss enabled
+      v
+validation split + early stopping
+```
+
+`chat.py` was also changed to stop on the first generated newline or EOS,
+use a lower default temperature, and apply repetition penalty only to tokens
+already generated in the answer. This is especially important for questions
+such as "GPUとは何ですか", because prompt words are no longer penalized when
+the answer needs to reuse them.
