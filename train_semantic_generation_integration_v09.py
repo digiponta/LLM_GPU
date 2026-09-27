@@ -72,6 +72,7 @@ def conditioned_loss(
     generation_model,
     semantic_model,
     semantic_adapter,
+    semantic_heads,
     hierarchy_head,
     projection,
     input_ids,
@@ -81,15 +82,21 @@ def conditioned_loss(
     label_smoothing,
 ):
     with torch.no_grad():
-        adapted, hierarchy_prob = infer_semantic_condition(
+        adapted, concept_prob, attribute_prob, hierarchy_prob = infer_semantic_condition(
             semantic_model,
             semantic_adapter,
+            semantic_heads,
             hierarchy_head,
             input_ids,
             prompt_index,
         )
 
-    semantic_bias = projection(adapted, hierarchy_prob)
+    semantic_bias = projection(
+        adapted,
+        concept_prob,
+        attribute_prob,
+        hierarchy_prob,
+    )
     hidden = forward_semantic_conditioned(
         generation_model,
         input_ids,
@@ -134,6 +141,7 @@ def evaluate(
             generation_model,
             semantic_model,
             semantic_adapter,
+            semantic_heads,
             hierarchy_head,
             projection,
             input_ids,
@@ -169,6 +177,7 @@ def main():
     (
         semantic_model,
         semantic_adapter,
+        semantic_heads,
         hierarchy_head,
         base_checkpoint,
         semantic_checkpoint,
@@ -187,6 +196,8 @@ def main():
 
     projection = SemanticGenerationProjection(
         semantic_dim=generation_model.d_model,
+        concept_dim=6,
+        attribute_dim=4,
         hierarchy_dim=5,
         d_model=generation_model.d_model,
         alpha=args.alpha,
@@ -272,8 +283,8 @@ def main():
     print("Base checkpoint loss   :", base_checkpoint.get("loss"))
     print("Semantic adapter loss  :", semantic_checkpoint.get("loss"))
     print("Semantic path          : frozen")
-    print("Condition representation: 256 semantic + 5 hierarchy = 261")
-    print("Projection             : 261 -> 256")
+    print("Condition representation: 256 semantic + 6 concept + 4 attribute + 5 hierarchy = 271")
+    print("Projection             : 271 -> 256")
     print("Alpha                  :", args.alpha)
     print("Inject after           :", args.inject_after)
     print("Blocks 1-3             : frozen")
@@ -317,6 +328,7 @@ def main():
                 generation_model,
                 semantic_model,
                 semantic_adapter,
+                semantic_heads,
                 hierarchy_head,
                 projection,
                 input_ids,
