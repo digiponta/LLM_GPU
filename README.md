@@ -3703,3 +3703,145 @@ Semantic-content >= 26/30
 Strict composite > 25/30 if possible
 ```
 
+### v0.9.1 Semantic-to-Generation Interface v0.8: Balanced Semantic Tokens
+
+v0.7 made semantic information attention-visible, but its three semantic tokens
+had extremely different magnitudes:
+
+```text
+G05
+SEM_IDENTITY  = 42.784
+SEM_CONCEPT   = 0.259
+SEM_HIERARCHY = 0.437
+```
+
+The information needed to solve G05 lives primarily in concept/hierarchy, so
+this imbalance can let the identity token dominate attention.
+
+v0.8 balances token magnitude before Blocks 4-6.
+
+For each semantic token:
+
+```text
+project semantic source
+    ->
+L2 normalize direction
+    ->
+multiply by sqrt(d_model)
+    ->
+multiply by positive learned token scale
+```
+
+With d_model=256:
+
+```text
+base token norm = sqrt(256) = 16
+```
+
+Initial learned relative scales:
+
+```text
+SEM_IDENTITY  = 1.0
+SEM_CONCEPT   = 1.0
+SEM_HIERARCHY = 1.0
+```
+
+The scales are parameterized as exponentials of trainable log-scales, so they
+stay positive while the model can learn the relative semantic-token strength.
+
+Architecture:
+
+```text
+SEM_IDENTITY:
+  adapted hidden
+    -> Linear(256 -> 256)
+    -> L2 normalize
+    -> norm 16 * learned identity scale
+
+SEM_CONCEPT:
+  concept + attribute
+    -> Linear(10 -> 256)
+    -> L2 normalize
+    -> norm 16 * learned concept scale
+
+SEM_HIERARCHY:
+  hierarchy
+    -> Linear(5 -> 256)
+    -> L2 normalize
+    -> norm 16 * learned hierarchy scale
+
+[SEM_IDENTITY][SEM_CONCEPT][SEM_HIERARCHY][text hidden...]
+    -> Blocks 4-6 Self-Attention
+    -> FinalNorm
+    -> remove semantic-token positions
+    -> LM Head
+```
+
+Training policy remains comparable to v0.7:
+
+```text
+semantic encoder       : frozen
+semantic adapter v0.5  : frozen
+semantic heads         : frozen
+hierarchy head         : frozen
+
+generation Blocks 1-3  : frozen
+generation Blocks 4-6  : trainable
+FinalNorm              : trainable
+LM Head                : frozen
+
+Boundary data          : v1 only
+projector LR           : 1e-3
+block LR               : 1e-5
+insert after           : Block 3
+```
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_semantic_token_balanced_v091.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v0.9.1-semantic-token-balanced-v08.pt
+```
+
+Logs:
+
+```text
+results/semantic_token_balanced_v091/train.log
+results/semantic_token_balanced_v091/eval.log
+```
+
+The evaluator reports:
+
+```text
+learned per-token scales
+actual token norms for G05/G08/G09
+30-case semantic/strict scores
+```
+
+Reference:
+
+```text
+v0.9 semantic integration : semantic 26/30, strict 25/30
+v0.6 semantic gated       : semantic 25/30, strict 24/30
+v0.7 semantic tokens      : semantic 25/30, strict 25/30
+```
+
+Primary targets:
+
+```text
+semantic token norms remain comparable
+G05 CPU becomes generation-correct
+G08 Transformer is correct and fluent
+G09 CUDA remains correct
+Semantic-content >= 26/30
+Strict composite > 25/30 if possible
+```
+
