@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -24,15 +25,23 @@ TRAIN_LOG = RESULTS_DIR / "train.log"
 EVAL_LOG = RESULTS_DIR / "eval.log"
 
 
+def utf8_child_env():
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    return env
+
+
 def run(command, log_path: Path) -> str:
     completed = subprocess.run(
         command,
         text=True,
         encoding="utf-8",
-        errors="replace",
+        errors="strict",
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         check=False,
+        env=utf8_child_env(),
     )
     output = completed.stdout or ""
     log_path.write_text(output, encoding="utf-8")
