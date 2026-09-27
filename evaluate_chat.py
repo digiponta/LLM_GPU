@@ -1,6 +1,6 @@
 # evaluate_chat.py
 #
-# Lightweight deterministic evaluation for LLM_GPU v0.5 conversational behavior.
+# Lightweight deterministic evaluation for LLM_GPU v0.6 conversational behavior.
 # This is not a general intelligence benchmark. It checks whether the small
 # model learned basic reply formatting, short-answer behavior, and a few
 # held-out conversational intents.
@@ -18,8 +18,8 @@ from model import LanguageModel
 from tokenizer import Tokenizer
 
 
-DEFAULT_TOKENIZER = "model/tokenizer.json"
-DEFAULT_MODEL = "model/model-gpu-v0.5-chat.pt"
+DEFAULT_TOKENIZER = "model/tokenizer-v0.6.json"
+DEFAULT_MODEL = "model/model-gpu-v0.6-chat.pt"
 
 TEST_CASES: List[Dict[str, object]] = [
     {"prompt": "こんにちは、元気ですか。", "keywords": ["こんにちは", "元気"]},
@@ -37,11 +37,11 @@ TEST_CASES: List[Dict[str, object]] = [
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Evaluate basic LLM_GPU v0.5 chat behavior."
+        description="Evaluate basic LLM_GPU v0.6 chat behavior."
     )
     parser.add_argument("--tokenizer", default=DEFAULT_TOKENIZER)
     parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--max-new-tokens", type=int, default=60)
+    parser.add_argument("--max-new-tokens", type=int, default=96)
     return parser.parse_args()
 
 
@@ -75,7 +75,7 @@ def main() -> None:
 
     print()
     print("====================================")
-    print(" LLM_GPU v0.5 Chat Evaluation")
+    print(" LLM_GPU v0.6 Chat Evaluation")
     print("====================================")
     print("Device          :", device)
     print("Checkpoint loss :", checkpoint.get("loss"))
