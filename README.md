@@ -2264,3 +2264,80 @@ The purpose of this experiment is to test whether the current plateau is caused
 primarily by insufficient semantic-boundary coverage rather than by optimizer
 strength or conditioning architecture.
 
+### v0.9 Targeted Boundary Training v2
+
+Boundary v1 improved the fixed 30-case development benchmark to:
+
+```text
+Semantic-content : 25/30 = 83.3%
+Strict composite : 25/30 = 83.3%
+Entity-explicit  : 9/9 = 100.0%
+```
+
+v2 keeps the v1 rows and adds 21 more matched boundary examples focused only
+on the five remaining failures:
+
+```text
+G05 CPU
+G08 Transformer
+G12 short
+G15 repeat
+G18 end
+```
+
+The new rows target:
+
+```text
+CPU reverse identification
+Transformer = Attention + model/structure category
+short <-> repeat
+end <-> topic
+```
+
+The v2 rows are optional and are enabled with:
+
+```text
+--targeted-boundary-v2
+```
+
+The dedicated v2 runner enables both v1 and v2 so that the previously gained
+GPU/CPU, Python, and topic improvements are retained.
+
+Fixed settings:
+
+```text
+block LR      : 1e-5
+projection LR : 1e-3
+alpha         : 0.1
+inject-after  : Block 3
+LM Head       : frozen
+boundary v1   : enabled
+boundary v2   : enabled
+```
+
+Run:
+
+```powershell
+git checkout v0.9
+git pull
+
+python run_targeted_boundary_v2_v09.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v0.9-partial-intent-boundary-v2.pt
+```
+
+Logs:
+
+```text
+results/targeted_boundary_v2_v09/train.log
+results/targeted_boundary_v2_v09/eval.log
+```
+
+The 21 v2 prompts were checked against the unchanged fixed 30 development
+prompts and have zero exact prompt overlap. Child-process output is forced to
+UTF-8 on Windows.
+
