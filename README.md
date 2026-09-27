@@ -3187,3 +3187,146 @@ unseen CPU/GPU/LLM/CUDA alias probes pass
 
 Generation remains unchanged until the semantic geometry passes this gate.
 
+### v0.9 Semantic Encoder Adapter v0.5: Hierarchical Processor Semantics
+
+v0.4 showed that acronym/full-name alignment alone was not enough to solve
+the CPU/GPU boundary. v0.5 therefore changes the semantic supervision from a
+flat CPU-vs-GPU distinction to a small hierarchy.
+
+Hierarchy:
+
+```text
+processor
+├─ CPU branch
+│  ├─ general-purpose
+│  └─ control-oriented
+└─ GPU branch
+   ├─ throughput-oriented
+   └─ data-parallel
+```
+
+The hierarchy deliberately keeps CPU and GPU under the shared parent
+`processor`. The distinction is therefore not "processor versus non-processor";
+it is the design emphasis inside the processor family.
+
+Hierarchy labels:
+
+```text
+processor
+general_purpose
+control_oriented
+throughput_oriented
+data_parallel
+```
+
+CPU supervision emphasizes:
+
+```text
+diverse instructions
+branching and control
+OS / sequential control
+general-purpose workloads
+low-latency mixed workloads
+```
+
+GPU supervision emphasizes:
+
+```text
+many similar operations
+data parallelism
+high throughput
+matrix / numerical parallel workloads
+```
+
+A dedicated hierarchy head is trained together with the existing semantic
+adapter:
+
+```text
+adapted hidden 256
+  -> hierarchy head
+  -> 5 sigmoid hierarchy probabilities
+```
+
+In addition to BCE, v0.5 adds a hierarchy contrast objective:
+
+```text
+CPU examples:
+general_purpose + control_oriented
+  >
+throughput_oriented + data_parallel
+
+GPU examples:
+throughput_oriented + data_parallel
+  >
+general_purpose + control_oriented
+```
+
+Loss weights:
+
+```text
+Concept CE             : 1.00
+Attribute BCE          : 0.75
+Hierarchy BCE          : 1.00
+Hierarchy Contrast     : 0.75
+Centroid Margin Loss   : 0.20
+Pairwise Hard Negative : 0.50
+Preservation Loss      : 0.25
+
+learning rate          : 1e-4
+```
+
+Training continues from:
+
+```text
+model/model-gpu-v0.9-semantic-adapter-v04.pt
+```
+
+and writes:
+
+```text
+model/model-gpu-v0.9-semantic-adapter-v05.pt
+```
+
+Run:
+
+```powershell
+git checkout v0.9
+git pull
+
+python run_semantic_encoder_adapter_v05.py
+```
+
+Logs:
+
+```text
+results/semantic_encoder_adapter_v05/train.log
+results/semantic_encoder_adapter_v05/eval.log
+```
+
+The v0.5 evaluation adds a hierarchical processor probe. For G05 the key
+success condition is no longer only the nearest centroid. It also requires:
+
+```text
+processor probability >= 0.5
+
+CPU-style score
+  = mean(general_purpose, control_oriented)
+
+GPU-style score
+  = mean(throughput_oriented, data_parallel)
+
+CPU-style score > GPU-style score
+```
+
+Primary integration gate:
+
+```text
+G05 adapted centroid -> CPU
+G05 hierarchy identifies processor
+G05 CPU-style score > GPU-style score
+G08 adapted centroid -> Transformer
+technical held-out centroid accuracy does not regress
+```
+
+Generation remains unchanged until the semantic hierarchy passes this gate.
+
