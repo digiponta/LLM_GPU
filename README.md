@@ -2177,3 +2177,90 @@ The goal is to find whether a point near 1e-5 can preserve the new `end`
 improvement while avoiding the CPU regression seen at the stronger 2e-5
 setting.
 
+### v0.9 Targeted Boundary Training
+
+After the local block-LR sweep stabilized at 23/30 across roughly
+`7.5e-6` through `1.5e-5`, the next experiment targets the remaining
+semantic boundaries directly while keeping the current best training setup
+fixed.
+
+The experiment adds 24 matched boundary rows covering:
+
+```text
+CPU <-> GPU
+Transformer <-> CUDA <-> Python
+short <-> repeat <-> topic <-> end
+```
+
+Examples are deliberately paired so that very similar surface forms require
+different answers depending on the decisive semantic cue.
+
+The boundary rows are optional and do not change the default behavior of
+`augment_pairs()`. They are enabled only with:
+
+```text
+--targeted-boundary
+```
+
+This preserves reproducibility of all earlier v0.8/v0.9 runs.
+
+Fixed settings for the first boundary experiment:
+
+```text
+block LR      : 1e-5
+projection LR : 1e-3
+alpha         : 0.1
+inject-after  : Block 3
+LM Head       : frozen
+```
+
+Run the complete experiment:
+
+```powershell
+git checkout v0.9
+git pull
+
+python run_targeted_boundary_v09.py
+```
+
+The runner trains:
+
+```text
+model/model-gpu-v0.9-partial-intent-boundary.pt
+```
+
+and then evaluates it on the unchanged fixed 30-case benchmark.
+
+Logs are written to:
+
+```text
+results/targeted_boundary_v09/train.log
+results/targeted_boundary_v09/eval.log
+```
+
+The 24 new boundary prompts were checked against the fixed 30 benchmark prompts
+and have zero exact prompt overlap.
+
+Reference before Targeted Boundary Training:
+
+```text
+Semantic-content : 23/30 = 76.7%
+Strict composite : 23/30 = 76.7%
+```
+
+The main residual targets are:
+
+```text
+cpu
+gpu_cpu
+transformer
+python
+repeat
+short
+topic
+```
+
+The purpose of this experiment is to test whether the current plateau is caused
+primarily by insufficient semantic-boundary coverage rather than by optimizer
+strength or conditioning architecture.
+
