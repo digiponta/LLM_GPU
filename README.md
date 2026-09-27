@@ -1511,3 +1511,84 @@ Strict composite : 16/30 = 53.3%
 Fluency          : 29/30 = 96.7%
 ```
 
+### v0.8 reverse-definition + replay balancing
+
+The reverse-definition refinement improved the multidimensional benchmark to:
+
+```text
+Semantic-content : 20/30 = 66.7%
+Strict composite : 20/30 = 66.7%
+Fluency          : 30/30 = 100.0%
+```
+
+However, debug/error and some conversational-control intents regressed. To
+reduce this interference without changing the architecture, v0.8 now adds
+training-only replay balancing.
+
+Protected replay tags:
+
+```text
+debug_error
+control_repeat
+control_topic
+```
+
+Default replay factor:
+
+```text
+--replay-repeat 2
+```
+
+This means one extra training copy is added for protected rows. Validation rows
+are not replayed.
+
+Broad technical oversampling remains disabled:
+
+```text
+--technical-repeat 1
+```
+
+so the experiment isolates:
+
+```text
+reverse-definition binding
++
+small replay of regressed nontechnical intents
+```
+
+The repeat-intent tagger was also tightened. The generic word `説明` is no
+longer sufficient to assign `control_repeat`, preventing ordinary technical
+"explain X" prompts from being accidentally replayed as repeat-control data.
+
+The v0.8 architecture remains unchanged:
+
+```text
+d_model       : 256
+layers        : 6
+heads         : 8
+FFN           : 1024
+context       : 512
+tokenizer     : fixed v0.7 BPE
+```
+
+Pretraining does not need to be repeated:
+
+```powershell
+git checkout v0.8
+git pull
+
+python train_sft_v08.py
+python evaluate_chat.py
+python evaluate_generalization_v07.py
+```
+
+For ablation:
+
+```powershell
+python train_sft_v08.py --replay-repeat 1
+python train_sft_v08.py --replay-repeat 2
+python train_sft_v08.py --replay-repeat 3
+```
+
+`1` disables replay; `2` is the new default.
+
