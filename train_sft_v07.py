@@ -227,6 +227,7 @@ def forward_losses(
     intent_targets,
     label_smoothing,
     intent_loss_weight,
+    pos_weight,
 ):
     hidden = model.forward_hidden(input_ids)
     logits = model.lm_head(hidden)
@@ -245,12 +246,17 @@ def forward_losses(
     intent_loss = F.binary_cross_entropy_with_logits(
         intent_logits,
         intent_targets,
+        pos_weight=pos_weight,
     )
     intent_pred = (torch.sigmoid(intent_logits) >= 0.5).float()
-    intent_acc = (intent_pred == intent_targets).float().mean()
+
+    tp = (intent_pred * intent_targets).sum()
+    fp = (intent_pred * (1.0 - intent_targets)).sum()
+    fn = ((1.0 - intent_pred) * intent_targets).sum()
+    micro_f1 = (2.0 * tp) / (2.0 * tp + fp + fn).clamp_min(1.0)
 
     total_loss = lm_loss + intent_loss_weight * intent_loss
-    return total_loss, lm_loss, intent_loss, intent_acc
+    return total_loss, lm_loss, intent_loss, micro_f1
 
 
 @torch.no_grad()
@@ -261,6 +267,7 @@ def evaluate(
     device,
     label_smoothing,
     intent_loss_weight,
+    pos_weight,
 ):
     model.eval()
     intent_head.eval()
@@ -284,6 +291,7 @@ def evaluate(
             intent_targets,
             label_smoothing,
             intent_loss_weight,
+            pos_weight,
         )
         for i, value in enumerate(values):
             sums[i] += float(value.item())
@@ -291,6 +299,28 @@ def evaluate(
 
     return tuple(value / max(1, batches) for value in sums)
 
+
+
+def compute_pos_weight(
+    rows: Sequence[Tuple[str, str, Tuple[str, ...]]],
+    labels: Sequence[str],
+    device: torch.device,
+) -> torch.Tensor:
+    counts = {label: 0 for label in labels}
+    for _, _, tags in rows:
+        for label in tags:
+            if label in counts:
+                counts[label] += 1
+
+    total = max(1, len(rows))
+    values = []
+    for label in labels:
+        pos = max(1, counts[label])
+        neg = max(1, total - counts[label])
+        # Cap extreme weights so very rare tags do not dominate LM learning.
+        values.append(min(10.0, neg / pos))
+
+    return torch.tensor(values, dtype=torch.float32, device=device)
 
 def main() -> None:
     args = parse_args()
@@ -343,6 +373,7 @@ def main() -> None:
         validation_ratio=args.validation_ratio,
         seed=SEED,
     )
+    pos_weight = compute_pos_weight(train_rows, labels, device)
 
     train_set = MultiTaskDataset(
         train_rows, tokenizer, model.context_length, label_to_id
@@ -389,6 +420,11 @@ def main() -> None:
     print("Train rows         :", len(train_rows))
     print("Validation rows    :", len(val_rows))
     print("Multi-label weight :", args.intent_loss_weight)
+    print(
+        "Positive weights   :",
+        f"min={pos_weight.min().item():.2f}",
+        f"max={pos_weight.max().item():.2f}",
+    )
     print("Label smoothing    :", args.label_smoothing)
     print("Learning rate      :", args.learning_rate)
     print()
@@ -424,6 +460,7 @@ def main() -> None:
                 intent_targets,
                 args.label_smoothing,
                 args.intent_loss_weight,
+                pos_weight,
             )
             loss.backward()
             torch.nn.utils.clip_grad_norm_(
@@ -441,15 +478,16 @@ def main() -> None:
         train_loss = total / max(1, batches)
         train_lm = lm_total / max(1, batches)
         train_intent = intent_total / max(1, batches)
-        train_acc = acc_total / max(1, batches)
+        train_f1 = acc_total / max(1, batches)
 
-        val_loss, val_lm, val_intent, val_acc = evaluate(
+        val_loss, val_lm, val_intent, val_f1 = evaluate(
             model,
             intent_head,
             val_loader,
             device,
             args.label_smoothing,
             args.intent_loss_weight,
+            pos_weight,
         )
         elapsed = time.perf_counter() - started
 
@@ -458,7 +496,7 @@ def main() -> None:
             f"| train={train_loss:.4f} lm={train_lm:.4f} "
             f"intent={train_intent:.4f} tag_acc={train_acc:.1%} "
             f"| val={val_loss:.4f} lm={val_lm:.4f} "
-            f"intent={val_intent:.4f} intent_acc={val_acc:.1%} "
+            f"intent={val_intent:.4f} tag_f1={val_f1:.1%} "
             f"| {elapsed:.2f}s"
         )
 
