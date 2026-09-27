@@ -4254,3 +4254,98 @@ repeated homogeneous computation -> GPU-like
 Only after this binding gate passes should the refined semantic adapter be
 reconnected to a generation experiment.
 
+### v0.9.1 Semantic Encoder Adapter v0.6.2: G05-Neighborhood Binding
+
+v0.6.1 improved instruction semantics broadly and passed 10/11 gates, but the
+exact G05 development prompt still had:
+
+```text
+heterogeneous_instruction
+<
+homogeneous_computation
+```
+
+even though G05 remained CPU-like overall.
+
+v0.6.2 therefore performs a local lexical/semantic binding refinement around
+G05 without using the exact G05 prompt.
+
+Neighborhood expressions include:
+
+```text
+central/core device
+diverse instructions
+broad instruction set
+varied instructions
+different instruction types
+general-purpose processor
+control + branch + memory operations
+```
+
+Important constraints:
+
+```text
+exact G05 prompt used for training : no
+base encoder                       : frozen
+semantic adapter                   : frozen
+concept / attribute heads          : frozen
+7-axis hierarchy head              : trainable
+generation                         : unchanged
+```
+
+Freezing the adapter is intentional. v0.6.1 already preserved good CPU
+centroid geometry and G08 Transformer behavior; v0.6.2 changes only the mapping
+from that semantic representation into the instruction hierarchy axes.
+
+Direct neighborhood objective:
+
+```text
+CPU-neighborhood:
+P(heterogeneous_instruction)
+  >=
+P(homogeneous_computation) + 0.20
+
+GPU-neighborhood:
+P(homogeneous_computation)
+  >=
+P(heterogeneous_instruction) + 0.20
+```
+
+The previous hierarchy behavior is preserved with an MSE replay loss over the
+existing semantic supervision bank.
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_semantic_encoder_adapter_v062.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v0.9.1-semantic-adapter-v062.pt
+```
+
+Logs:
+
+```text
+results/semantic_encoder_adapter_v062/train.log
+results/semantic_encoder_adapter_v062/eval.log
+```
+
+Primary gate:
+
+```text
+G05 centroid -> CPU
+G05 heterogeneous_instruction > homogeneous_computation
+G08 Transformer retained
+technical held-out accuracy does not regress
+central/diverse/broad/varied instruction paraphrases -> CPU-like
+homogeneous computation probes -> GPU-like
+```
+
+Generation remains untouched until this local binding gate is evaluated.
+
