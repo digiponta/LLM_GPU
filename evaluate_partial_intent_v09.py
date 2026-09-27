@@ -13,9 +13,9 @@ from typing import Dict, List, Sequence, Tuple
 
 import torch
 
-from chat_mid_intent_v09 import AI_PREFIX, USER_PREFIX, generate_reply
+from chat_partial_intent_v09 import AI_PREFIX, USER_PREFIX, generate_reply
 from intent_conditioning_v09 import load_intent_head
-from mid_intent_conditioning_v09 import load_mid_projection
+from partial_intent_conditioning_v09 import load_partial_checkpoint
 from model import LanguageModel
 from tokenizer_bpe import Tokenizer
 
@@ -302,17 +302,25 @@ def main() -> None:
         raise FileNotFoundError(args.model)
     if not Path(args.intent_head).exists():
         raise FileNotFoundError(args.intent_head)
-    if not Path(args.projection).exists():
-        raise FileNotFoundError(args.projection)
+    if not Path(args.partial).exists():
+        raise FileNotFoundError(args.partial)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     tokenizer = Tokenizer.load(args.tokenizer)
-    model, checkpoint = LanguageModel.load_checkpoint(args.model, device=device)
-    intent_head, _head_checkpoint, labels = load_intent_head(
-        args.intent_head, model, device
+
+    intent_model, checkpoint = LanguageModel.load_checkpoint(
+        args.model,
+        device=device,
     )
-    projection, projection_checkpoint = load_mid_projection(
-        args.projection, model, labels, device
+    intent_head, _head_checkpoint, labels = load_intent_head(
+        args.intent_head,
+        intent_model,
+        device,
+    )
+    model, projection, projection_checkpoint = load_partial_checkpoint(
+        args.partial,
+        device,
+        labels,
     )
 
     print()
