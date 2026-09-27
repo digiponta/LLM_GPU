@@ -1748,3 +1748,85 @@ It can be overridden for diagnosis:
 python evaluate_intent_v09.py --threshold 0.4
 ```
 
+## v0.9 soft Intent-Conditioned Generation
+
+v0.9 now implements soft intent conditioning without hard thresholding.
+
+The conditioning path is:
+
+```text
+Prompt
+  -> frozen v0.8 Transformer
+  -> prompt hidden state
+  -> frozen multi-label Intent Head
+  -> sigmoid probabilities (24 dims)
+  -> zero-initialized Linear(24 -> 256)
+  -> alpha * intent bias
+  -> add to LM hidden state
+  -> frozen LM head
+  -> answer
+```
+
+The first v0.9 experiment is intentionally projection-only. The v0.8
+pairwise-best language model and its intent head are frozen, and only the small
+intent projection is trained. This isolates the effect of the new
+intent-to-generation path and reduces catastrophic regression risk.
+
+Defaults:
+
+```text
+base model   : model/model-gpu-v0.8-chat-pairwise-best.pt
+intent head  : model/model-gpu-v0.8-intent-head.pt
+projection   : model/model-gpu-v0.9-soft-intent.pt
+alpha        : 0.1
+projection   : 24 -> 256
+initialization: zero (exact no-op at step zero)
+learning rate: 1e-3
+epochs       : 20
+```
+
+No threshold is used for generation conditioning:
+
+```python
+intent_prob = sigmoid(intent_logits)
+intent_bias = alpha * projection(intent_prob)
+conditioned_hidden = hidden + intent_bias
+```
+
+This preserves confidence information such as a 0.46 Python score versus a
+0.19 short-control score instead of converting both into hard ON/OFF tags.
+
+Train only the v0.9 projection:
+
+```powershell
+git checkout v0.9
+git pull
+
+python train_sft_v09.py
+```
+
+Then run the unchanged 30-case benchmark through the new generation path:
+
+```powershell
+python evaluate_generalization_v09.py
+```
+
+Interactive chat:
+
+```powershell
+python chat_v09.py
+```
+
+The comparison baseline is the saved v0.8 pairwise-best checkpoint:
+
+```text
+Semantic-content : 22/30 = 73.3%
+Strict composite : 22/30 = 73.3%
+Fluency          : 30/30 = 100.0%
+```
+
+A useful success condition is improvement on cases where the intent head was
+already correct but generation failed (for example GPU/CPU general-processing,
+topic/repeat/end controls), without regressing the stable GPU, error, compare,
+CUDA/GPU, and LLM/Transformer cases.
+
