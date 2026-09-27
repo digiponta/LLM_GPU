@@ -1,6 +1,6 @@
 # evaluate_chat.py
 #
-# Deterministic semantic-aware regression evaluation for LLM_GPU v0.7.
+# Deterministic semantic-aware regression evaluation for LLM_GPU v0.8.
 # PASS requires all required concept groups and rejects forbidden/conflicting
 # concepts. This avoids false positives such as a GPU answer that actually
 # describes a CPU.
@@ -19,7 +19,7 @@ from tokenizer_bpe import Tokenizer
 
 
 DEFAULT_TOKENIZER = "model/tokenizer-v0.7-bpe.json"
-DEFAULT_MODEL = "model/model-gpu-v0.7-chat.pt"
+DEFAULT_MODEL = "model/model-gpu-v0.8-chat.pt"
 
 # required_all is a list of synonym groups.
 # At least one phrase from EVERY group must appear.
@@ -113,7 +113,7 @@ TECHNICAL_CONTRAST_CASES: List[Dict[str, object]] = [
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Semantic-aware evaluation for LLM_GPU v0.7 chat."
+        description="Semantic-aware evaluation for LLM_GPU v0.8 chat."
     )
     parser.add_argument("--tokenizer", default=DEFAULT_TOKENIZER)
     parser.add_argument("--model", default=DEFAULT_MODEL)
@@ -193,7 +193,7 @@ def main() -> None:
 
     print()
     print("====================================")
-    print(" LLM_GPU v0.7 Semantic Evaluation")
+    print(" LLM_GPU v0.8 Semantic Evaluation")
     print("====================================")
     print("Device          :", device)
     print("Checkpoint loss :", checkpoint.get("loss"))
