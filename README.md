@@ -3927,3 +3927,110 @@ K,V = semantic tokens
 
 This probe intentionally does not change any model parameter or checkpoint.
 
+### v0.9.1 Semantic-to-Generation Interface v0.9: Semantic Cross-Attention
+
+The Semantic Attention Probe showed that semantic tokens are not completely
+ignored. Some heads attend to them strongly, but the attention is highly uneven
+across blocks and heads, and the correct semantic signal does not reliably
+control generation.
+
+v0.9 therefore introduces a dedicated semantic read path:
+
+```text
+Q   = text hidden after Block 3
+K,V = balanced semantic tokens
+```
+
+Architecture:
+
+```text
+text tokens
+  -> Blocks 1-3
+  -> Semantic Cross-Attention
+       Q = text hidden
+       K = SEM_IDENTITY / SEM_CONCEPT / SEM_HIERARCHY
+       V = SEM_IDENTITY / SEM_CONCEPT / SEM_HIERARCHY
+  -> gated residual
+  -> Blocks 4-6
+  -> FinalNorm
+  -> LM Head
+```
+
+The three semantic tokens come from the trained Balanced Semantic Tokens v0.8
+projector, but that projector is frozen during this experiment.
+
+Controlled comparison:
+
+```text
+semantic encoder v0.5      : frozen
+balanced projector v0.8    : frozen
+
+generation model start     : v0.8 pairwise-best
+Blocks 1-3                 : frozen
+Semantic Cross-Attention   : trainable
+Blocks 4-6                 : trainable
+FinalNorm                  : trainable
+LM Head                    : frozen
+```
+
+Cross-Attention uses 8 heads. The semantic residual has a learned sigmoid scale
+initialized to 0.1, so the dedicated path starts with a controlled influence.
+
+Training:
+
+```text
+Boundary data : v1 only
+Cross LR      : 1e-3
+Block LR      : 1e-5
+Inject after  : Block 3
+```
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_semantic_cross_attention_v091.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v0.9.1-semantic-cross-attn-v09.pt
+```
+
+Logs:
+
+```text
+results/semantic_cross_attention_v091/train.log
+results/semantic_cross_attention_v091/eval.log
+```
+
+The evaluator reports head-level Cross-Attention weights for G05, G08, and G09:
+
+```text
+text -> SEM_IDENTITY
+text -> SEM_CONCEPT
+text -> SEM_HIERARCHY
+```
+
+References before v0.9:
+
+```text
+v0.9 semantic integration : semantic 26/30, strict 25/30
+v0.6 semantic gated       : semantic 25/30, strict 24/30
+v0.7 semantic tokens      : semantic 25/30, strict 25/30
+v0.8 balanced tokens      : semantic 25/30, strict 25/30
+```
+
+Primary targets:
+
+```text
+G05 CPU becomes generation-correct
+G08 Transformer becomes correct and fluent
+G09 CUDA remains correct
+Semantic-content >= 26/30
+Strict composite > 25/30 if possible
+```
+
