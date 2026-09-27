@@ -65,17 +65,14 @@ def generate_reply(
     model: LanguageModel,
     tokenizer: Tokenizer,
     prompt: str,
-    max_new_tokens: int = 48,
-    temperature: float = 0.35,
-    top_k: int = 10,
+    max_new_tokens: int = 96,
+    temperature: float = 0.45,
+    top_k: int = 20,
     repetition_penalty: float = 1.05,
 ) -> Tuple[str, int]:
     prompt_ids = tokenizer.encode(prompt, add_bos=True)
     generated = list(prompt_ids)
     response_ids: List[int] = []
-
-    newline_ids = tokenizer.encode("\n")
-    newline_id = newline_ids[0] if newline_ids else None
 
     model.eval()
     device = next(model.parameters()).device
@@ -85,9 +82,7 @@ def generate_reply(
         x = torch.tensor([context], dtype=torch.long, device=device)
         logits = model(x)[0, -1, :].clone()
 
-        # Penalize only tokens already generated in the reply.
-        # Penalizing prompt tokens makes it harder to answer with words
-        # contained in the question (for example "GPU").
+        # Penalize only tokens already emitted in the assistant reply.
         if repetition_penalty != 1.0:
             for token_id in set(response_ids):
                 if logits[token_id] >= 0:
@@ -110,18 +105,29 @@ def generate_reply(
 
         if next_id == tokenizer.eos_id:
             break
-        if newline_id is not None and next_id == newline_id:
-            break
 
         generated.append(next_id)
         response_ids.append(next_id)
 
+        # BPE may represent a newline or role boundary with multiple IDs.
+        # Decode the accumulated response and detect boundaries in text space.
+        decoded = tokenizer.decode(
+            response_ids,
+            skip_special_tokens=True,
+        )
+        if "\n" in decoded:
+            break
+
     reply = tokenizer.decode(
         response_ids,
         skip_special_tokens=True,
-    ).strip()
+    )
 
-    return reply, len(response_ids)
+    for marker in ("\n人:", "\nAI:", "\n"):
+        if marker in reply:
+            reply = reply.split(marker, 1)[0]
+
+    return reply.strip(), len(response_ids)
 
 
 def main() -> None:
