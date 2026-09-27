@@ -330,6 +330,52 @@ AUGMENT_BANK: Dict[str, Dict[str, Sequence[str]]] = {
 }
 
 
+
+
+RELATION_AUGMENT_ROWS: Sequence[Tuple[str, str]] = [
+    (
+        "CPUとGPUの役割の違いを説明してください。",
+        "CPUは汎用処理や制御を担当し、GPUは大量の並列計算を得意とします。",
+    ),
+    (
+        "CPUとGPUは何が違いますか。",
+        "CPUは多様な命令の汎用処理、GPUは大量の並列計算を得意とします。",
+    ),
+    (
+        "並列処理ではCPUとGPUのどちらが向いていますか。",
+        "大量の並列処理にはGPUが向いています。",
+    ),
+    (
+        "汎用的な制御ではCPUとGPUのどちらが向いていますか。",
+        "汎用的な制御や複雑な命令実行にはCPUが向いています。",
+    ),
+    (
+        "LLMとTransformerの関係を教えてください。",
+        "LLMは言語モデルで、TransformerはLLMの実装によく使われるニューラルネットワーク構造です。",
+    ),
+    (
+        "LLMとTransformerは同じものですか。",
+        "いいえ。LLMは言語モデルで、Transformerはモデル構造です。",
+    ),
+    (
+        "CUDAとGPUの違いを説明してください。",
+        "GPUは演算装置で、CUDAはNVIDIA GPUを汎用計算に使うための技術です。",
+    ),
+    (
+        "CUDAはGPUそのものですか。",
+        "いいえ。GPUはハードウェアで、CUDAはGPUを利用するための技術です。",
+    ),
+    (
+        "PythonとCUDAの違いを説明してください。",
+        "Pythonはプログラミング言語で、CUDAはNVIDIA GPU向けの計算技術です。",
+    ),
+    (
+        "PythonとCUDAは同じ種類ですか。",
+        "いいえ。Pythonは言語で、CUDAはGPU計算技術です。",
+    ),
+]
+
+
 def augment_pairs(
     base_pairs: Sequence[Pair],
     variants_per_intent: int = 24,
@@ -349,6 +395,9 @@ def augment_pairs(
         output.append((key[0], key[1], tuple(sorted(tags))))
 
     for prompt, answer in base_pairs:
+        add(prompt, answer)
+
+    for prompt, answer in RELATION_AUGMENT_ROWS:
         add(prompt, answer)
 
     for label, bank in AUGMENT_BANK.items():
