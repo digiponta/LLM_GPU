@@ -494,7 +494,7 @@ def main() -> None:
         print(
             f"Epoch {epoch:02d}/{args.epochs} "
             f"| train={train_loss:.4f} lm={train_lm:.4f} "
-            f"intent={train_intent:.4f} tag_acc={train_acc:.1%} "
+            f"intent={train_intent:.4f} tag_f1={train_f1:.1%} "
             f"| val={val_loss:.4f} lm={val_lm:.4f} "
             f"intent={val_intent:.4f} tag_f1={val_f1:.1%} "
             f"| {elapsed:.2f}s"
