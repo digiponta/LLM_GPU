@@ -44,8 +44,11 @@ tokenizer.py          character tokenizer compatible with the original project
 dataset.py            next-token dataset / uniform sampled windows
 model.py              CUDA-capable Transformer language model
 train.py              GPU training loop with progress and ETA
-train_corpus.py       corpus training entry point
-infer.py              interactive GPU inference
+train_corpus.py       corpus pretraining entry point
+train_conversation.py v0.5 conversational fine-tuning from the v0.4 checkpoint
+chat.py               multi-turn conversational interface
+evaluate_chat.py      deterministic conversational regression evaluation
+infer.py              interactive raw GPU inference
 check_gpu.py          CUDA/PyTorch diagnostic
 prepare_wikipedia.py  Wikipedia dump -> plain text helper
 requirements.txt      Python dependencies
@@ -225,3 +228,141 @@ For QHA-oriented experiments, **10M–20M tokens of pretraining plus task-specif
 2. Evaluate training loss, validation loss, perplexity, generated-text quality, and semantic representation quality.
 3. Compare it with a larger model such as **`d_model=128` and 4 layers**.
 4. Use the comparison to separate **data-scale limits** from **model-scale limits**.
+
+
+---
+
+## v0.5 Conversational Learning Experiment
+
+v0.5 adds a second training stage for testing whether the existing sub-million-
+parameter model can acquire basic short Japanese conversational behavior.
+
+The design deliberately keeps the v0.4 architecture and tokenizer unchanged:
+
+```text
+general-ja.txt + data-nagato.txt
+        |
+        v
+train_corpus.py
+        |
+        v
+model-gpu-v0.4.pt
+        |
+        +---- data/conversation-ja.txt
+        |
+        v
+train_conversation.py
+        |
+        v
+model-gpu-v0.5-chat.pt
+        |
+        +---- chat.py
+        |
+        +---- evaluate_chat.py
+```
+
+### Conversation training data
+
+The included compact corpus uses short role markers to save context:
+
+```text
+人: こんにちは。
+AI: こんにちは。今日は何について話しましょうか。
+
+人: GPUとは何ですか。
+AI: 多数の計算を並列に処理するのが得意な演算装置です。
+```
+
+The current model has a context length of only 64 characters, so the examples
+and expected replies are intentionally short.
+
+### Step 1: prepare the v0.4 base model
+
+If `model/model-gpu-v0.4.pt` and `model/tokenizer.json` already exist,
+reuse them. Otherwise run:
+
+```powershell
+python train_corpus.py
+```
+
+### Step 2: conversational fine-tuning
+
+```powershell
+python train_conversation.py
+```
+
+Default fine-tuning settings:
+
+```text
+base checkpoint : model/model-gpu-v0.4.pt
+conversation data: data/conversation-ja.txt
+output checkpoint: model/model-gpu-v0.5-chat.pt
+epochs          : 5
+max samples     : 50,000
+learning rate   : 1e-4
+batch size      : 64
+```
+
+The script keeps the existing tokenizer. It reports the percentage of
+`<UNK>` tokens before training and warns when the conversation corpus contains
+too many characters not represented by the v0.4 vocabulary.
+
+Parameters can be changed from the command line, for example:
+
+```powershell
+python train_conversation.py --epochs 3 --max-samples 20000 --learning-rate 5e-5
+```
+
+### Step 3: chat
+
+```powershell
+python chat.py
+```
+
+Commands:
+
+```text
+/reset   clear short conversation history
+/exit    quit
+```
+
+The chat interface uses the same `人:` / `AI:` format as the fine-tuning
+corpus and retains a small amount of dialogue history. The model still has a
+64-character context limit, so long multi-turn conversation is not expected.
+
+### Step 4: evaluate
+
+```powershell
+python evaluate_chat.py
+```
+
+The evaluation uses greedy decoding for reproducibility and reports:
+
+- keyword hit rate on held-out prompts,
+- percentage of non-empty replies,
+- a simple repetition sanity check,
+- mean reply length.
+
+These are regression metrics for this experiment, not a claim of general
+conversational intelligence. Generated replies should also be inspected
+manually.
+
+### Experiment objective
+
+The v0.5 experiment asks:
+
+> Can a sub-million-parameter Transformer acquire basic Japanese
+> conversational behavior through dialogue-oriented fine-tuning?
+
+A useful comparison is:
+
+```text
+v0.4 pretrained model
+        vs.
+v0.5 conversation-fine-tuned model
+```
+
+If v0.5 learns speaker turn-taking and short responses but factual coverage,
+coherence, or multi-turn memory remain weak, the next bottleneck is likely the
+small model capacity and 64-character context rather than the chat interface
+itself.
