@@ -34,6 +34,15 @@ TEST_CASES: List[Dict[str, object]] = [
     {"prompt": "今日はここまでにします。", "keywords": ["お疲れ", "また"]},
 ]
 
+TECHNICAL_CONTRAST_CASES: List[Dict[str, object]] = [
+    {"prompt": "GPUの役割は何ですか。", "keywords": ["GPU", "並列", "計算"]},
+    {"prompt": "CPUはどんな装置ですか。", "keywords": ["CPU", "汎用", "命令"]},
+    {"prompt": "LLMは何をするモデルですか。", "keywords": ["LLM", "言語", "文章"]},
+    {"prompt": "Transformerの特徴は何ですか。", "keywords": ["Attention", "Transformer"]},
+    {"prompt": "CUDAは何のために使いますか。", "keywords": ["NVIDIA", "GPU", "計算"]},
+    {"prompt": "Pythonとは何ですか。", "keywords": ["Python", "プログラミング", "言語"]},
+]
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -136,6 +145,39 @@ def main() -> None:
         "Interpretation: keyword hit rate is only a small regression metric. "
         "Read the generated replies as well; this tiny model is not expected "
         "to provide broad factual or reasoning coverage."
+    )
+
+    print()
+    print("Technical contrast")
+    print("------------------")
+    technical_hits = 0
+    for index, case in enumerate(TECHNICAL_CONTRAST_CASES, start=1):
+        user_text = str(case["prompt"])
+        keywords = [str(k) for k in case["keywords"]]
+        prompt = f"{USER_PREFIX}{user_text}\n{AI_PREFIX}"
+
+        reply, _ = generate_reply(
+            model=model,
+            tokenizer=tokenizer,
+            prompt=prompt,
+            max_new_tokens=args.max_new_tokens,
+            temperature=0.0,
+            top_k=1,
+            repetition_penalty=1.05,
+        )
+
+        hit = any(keyword in reply for keyword in keywords)
+        technical_hits += int(hit)
+
+        print(f"[T{index:02d}] 人: {user_text}")
+        print(f"      AI: {reply}")
+        print("      keyword=" + ("PASS" if hit else "MISS"))
+
+    technical_count = len(TECHNICAL_CONTRAST_CASES)
+    print()
+    print(
+        f"Technical hit rate: {technical_hits}/{technical_count} "
+        f"({technical_hits / technical_count:.1%})"
     )
 
 
