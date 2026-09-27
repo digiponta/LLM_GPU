@@ -100,7 +100,7 @@ def main() -> None:
             max_new_tokens=args.max_new_tokens,
             temperature=0.0,
             top_k=1,
-            repetition_penalty=1.12,
+            repetition_penalty=1.05,
         )
 
         hit = any(keyword in reply for keyword in keywords)
