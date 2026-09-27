@@ -1687,3 +1687,64 @@ CUDA            : 0/1
 Python          : 0/1
 ```
 
+## v0.9 intent-head diagnostic
+
+Before changing the generation architecture, v0.9 adds:
+
+```text
+evaluate_intent_v09.py
+```
+
+The script runs the same fixed 30 generalization prompts and compares:
+
+```text
+expected intent tags
+predicted intent tags
+top intent probabilities
+current generated answer
+```
+
+It loads:
+
+```text
+model/model-gpu-v0.8-chat.pt
+model/model-gpu-v0.8-intent-head.pt
+model/tokenizer-v0.7-bpe.json
+```
+
+and reports:
+
+```text
+Expected-tag case recall
+Exact tag-set match
+Micro precision
+Micro recall
+Micro F1
+Per-intent expected-tag recall
+```
+
+The diagnostic purpose is to distinguish two cases:
+
+```text
+intent tags correct + answer wrong
+    -> intent recognition exists, but generation does not directly use it
+
+intent tags wrong + answer wrong
+    -> improve intent representation/training before conditioning generation
+```
+
+Run:
+
+```powershell
+git checkout v0.9
+git pull
+python evaluate_intent_v09.py
+```
+
+The default intent threshold is read from the saved intent-head checkpoint.
+It can be overridden for diagnosis:
+
+```powershell
+python evaluate_intent_v09.py --threshold 0.4
+```
+
