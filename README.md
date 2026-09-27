@@ -837,3 +837,52 @@ python evaluate_chat.py
 ```
 
 The second procedure is the clean comparison against the previous v0.7 result.
+
+### Semantic-aware evaluation correction
+
+The original v0.7 regression evaluator counted a case as PASS when any one
+keyword appeared. This could produce a false positive, for example:
+
+```text
+Prompt: GPUは何をするものですか。
+Reply : GPUはコンピュータ全体の汎用的な処理を担当する演算装置です。
+```
+
+The reply contains the string `GPU`, but semantically describes a CPU.
+
+The evaluator now uses two rules:
+
+1. every required semantic group must match at least one synonym;
+2. no forbidden/conflicting phrase may appear.
+
+For example, the GPU case now requires both:
+
+```text
+GPU
+AND
+one of: 並列 / 多数の計算 / 大量の計算
+```
+
+and rejects CPU-like descriptions such as:
+
+```text
+汎用的な処理を担当
+命令実行
+```
+
+The summary metric is therefore now:
+
+```text
+Semantic pass rate
+```
+
+and the technical diagnostic reports:
+
+```text
+Technical semantic rate
+```
+
+This is still a lightweight rule-based regression test rather than a general
+semantic benchmark, but it avoids the main false-PASS failure found in the
+previous keyword-only evaluation.
+
