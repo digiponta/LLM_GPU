@@ -62,6 +62,7 @@ TECHNICAL_TAGS = {
     "tech_gpu", "tech_cpu", "tech_llm",
     "tech_transformer", "tech_cuda", "tech_python",
 }
+PROTECTED_BOUNDARY_REPLAY_TAGS = {"protected_boundary_replay"}
 
 
 def parse_args() -> argparse.Namespace:
@@ -95,6 +96,17 @@ def parse_args() -> argparse.Namespace:
         "--targeted-boundary-v2",
         action="store_true",
         help="Include v0.9 targeted boundary v2 rows in SFT augmentation.",
+    )
+    p.add_argument(
+        "--protected-boundary-replay",
+        action="store_true",
+        help="Include protected replay rows for Boundary v3.",
+    )
+    p.add_argument(
+        "--protected-replay-repeat",
+        type=int,
+        default=3,
+        help="Training repeat factor for protected Boundary v3 rows.",
     )
     return p.parse_args()
 
@@ -377,6 +389,7 @@ def main() -> None:
         variants_per_intent=args.variants_per_intent,
         include_targeted_boundary=args.targeted_boundary,
         include_targeted_boundary_v2=args.targeted_boundary_v2,
+        include_protected_boundary_replay=args.protected_boundary_replay,
     )
 
     train_rows, val_rows = stratified_split(
@@ -395,6 +408,12 @@ def main() -> None:
         args.replay_repeat,
         REPLAY_TAGS,
     )
+    if args.protected_boundary_replay:
+        train_rows = oversample(
+            train_rows,
+            args.protected_replay_repeat,
+            PROTECTED_BOUNDARY_REPLAY_TAGS,
+        )
 
     train_set = PartialIntentDataset(
         train_rows,
@@ -461,6 +480,8 @@ def main() -> None:
     print("Block/FinalNorm LR    :", args.block_lr)
     print("Targeted boundary v1  :", args.targeted_boundary)
     print("Targeted boundary v2  :", args.targeted_boundary_v2)
+    print("Protected replay      :", args.protected_boundary_replay)
+    print("Protected repeat      :", args.protected_replay_repeat)
     print(
         "Projection params     :",
         sum(p.numel() for p in projection.parameters()),
