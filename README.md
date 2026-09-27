@@ -7216,3 +7216,111 @@ If higher consistency weight lowers semantic loss but G05/G08 remain MISS,
 the next experiment should change the semantic representation or supervision
 rather than further increasing LM-head learning rate.
 
+### v0.10.3: Semantic-to-Output Alignment
+
+v0.10.2 reached its best fixed-benchmark result at consistency weight `0.50`:
+
+```text
+Semantic-content : 27/30
+Strict composite : 27/30
+G05              : MISS
+G08              : MISS
+G09              : PASS
+G28              : PASS
+```
+
+The important diagnostic was that G05 and G08 could already have the correct
+semantic concept while generation still produced the wrong lexical output.
+v0.10.3 therefore keeps the best v0.10.2 optimization settings and adds a
+direct semantic-concept -> output-token alignment objective.
+
+Concept/entity mapping:
+
+```text
+tech_gpu         -> GPU
+tech_cpu         -> CPU
+tech_llm         -> LLM
+tech_transformer -> Transformer
+tech_cuda        -> CUDA
+tech_python      -> Python
+```
+
+For each training row, the frozen semantic teacher selects the highest
+probability technical concept. When its confidence is at least `0.70`, the
+first-answer-position logits are constrained so that the corresponding entity
+token exceeds the strongest competing technical entity token by a margin.
+
+Alignment loss:
+
+```text
+L_align = max(0, margin - logit(target_entity)
+                       + max(logit(other_entities)))
+
+L_total = L_LM
+        + 0.50 * L_semantic_consistency
+        + 0.10 * L_align
+```
+
+Default v0.10.3 settings:
+
+```text
+Consistency weight   : 0.50
+LM Head LR           : 3e-6
+Blocks 4-6 LR        : 1e-5
+Projection LR        : 1e-3
+Consistency-head LR  : 1e-3
+Alignment weight     : 0.10
+Alignment margin     : 0.75
+Alignment confidence : 0.70
+```
+
+New files:
+
+```text
+train_semantic_output_alignment_v0103.py
+evaluate_semantic_output_alignment_v0103.py
+run_semantic_output_alignment_v0103.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v0.10.3
+git pull origin v0.10.3
+
+python run_semantic_output_alignment_v0103.py
+```
+
+Output:
+
+```text
+model/model-gpu-v0.10.3-semantic-output-aligned.pt
+results/semantic_output_alignment_v0103/train.log
+results/semantic_output_alignment_v0103/evaluation.log
+```
+
+Primary success criteria:
+
+```text
+1. G05 should move from GPU-like generation toward CPU.
+2. G08 should generate Transformer cleanly.
+3. G09 and G28 should remain PASS.
+4. Semantic/strict score should remain >= 27/30, preferably improve.
+5. Alignment loss should decrease without destabilizing LM validation loss.
+```
+
+Interpretation:
+
+```text
+semantic correct + output corrected
+    -> semantic-to-generation coupling was the bottleneck.
+
+semantic correct + output still wrong
+    -> first-token entity alignment is insufficient; continuation-level
+       alignment or a learned semantic decoder is needed.
+
+benchmark regression
+    -> alignment weight/margin is too strong and should be swept.
+```
+
