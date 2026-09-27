@@ -6023,3 +6023,64 @@ CPU direction does not raise D
 Jacobian sign and finite-step behavior disagree
   -> strong local nonlinearity / curvature in the output map.
 ```
+### v0.12.2 Direct-Bias Gain Sweep
+
+This is a no-training sensitivity experiment on the current-best v0.12.2 checkpoint.
+
+Only the scale of the existing first-token direct semantic/entity correction is changed:
+
+```text
+final_logits = base_logits + gamma * gate * direct_bias
+```
+
+All model, semantic-adapter, name-binding, entity-adapter, and gate weights remain fixed.
+
+Gain values:
+
+```text
+gamma = 0.50, 1.00, 1.25, 1.50, 2.00, 2.50, 3.00
+```
+
+For every gamma, the evaluator runs the full fixed 30-case benchmark and both G05 wordings.
+
+It reports:
+
+```text
+Semantic / Strict / Fluency / Legacy rates
+Original G05 CPU-GPU final margin
+Name-request G05 CPU-GPU final margin
+CPU/GPU first-token ranks
+whether the generated answer explicitly contains CPU
+G08 Transformer
+G09 CUDA
+G10 Python
+G27 GPU
+G28 CPU
+```
+
+The purpose is to test whether v0.12.2 has the correct semantic correction direction but insufficient gain.
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_direct_bias_gain_sweep_v0122.py
+```
+
+Log:
+
+```text
+results/direct_bias_gain_sweep_v0122/sweep.log
+```
+
+Primary interpretation:
+
+```text
+If a moderate gamma flips G05 to CPU while preserving the benchmark:
+  -> v0.12.2 direction is sound and direct-bias gain is the main remaining issue.
+
+If G05 requires a very large gamma and other cases regress first:
+  -> simple global gain is insufficient; correction must become concept-specific.
+```
