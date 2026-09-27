@@ -1830,3 +1830,63 @@ already correct but generation failed (for example GPU/CPU general-processing,
 topic/repeat/end controls), without regressing the stable GPU, error, compare,
 CUDA/GPU, and LLM/Transformer cases.
 
+### v0.9 inference-time alpha sweep
+
+The trained soft-intent projection can now be evaluated at multiple inference
+strengths without retraining.
+
+Run:
+
+```powershell
+git checkout v0.9
+git pull
+
+python evaluate_alpha_sweep_v09.py
+```
+
+Default sweep:
+
+```text
+alpha = 0.0, 0.1, 0.25, 0.5, 1.0
+```
+
+All values reuse the same:
+
+```text
+v0.8 pairwise-best base model
+v0.8 intent head
+v0.9 trained projection weights
+fixed 30-case generalization benchmark
+greedy generation settings
+```
+
+Only `projection.alpha` changes at inference time.
+
+The script reports:
+
+```text
+overall semantic / strict / entity / fluency / legacy scores
+strict delta versus alpha=0.0
+which cases improved
+which cases regressed
+which replies changed
+per-intent strict comparison
+best observed alpha(s)
+```
+
+To print every generated reply for every alpha:
+
+```powershell
+python evaluate_alpha_sweep_v09.py --show-cases
+```
+
+Custom sweep values are also supported:
+
+```powershell
+python evaluate_alpha_sweep_v09.py --alphas 0 0.05 0.1 0.2 0.5 1.0
+```
+
+This is an inference-strength ablation only. The projection was trained at
+alpha=0.1, so results at other alpha values measure post-training scaling, not
+separately optimized projection checkpoints.
+
