@@ -2727,3 +2727,70 @@ Primary targets remain G05 CPU reverse identification and G08 Transformer
 category completion. G02 GPU and the short/repeat/end control intents are
 explicit regression-watch cases.
 
+### v0.9 Semantic Probe Diagnostic
+
+Before changing the conditioning or generation architecture again, v0.9 now
+adds a no-training diagnostic for the frozen v0.8 pairwise-best encoder:
+
+```text
+semantic_probe_v09.py
+```
+
+The diagnostic builds technical concept centroids for:
+
+```text
+GPU
+CPU
+LLM
+Transformer
+CUDA
+Python
+```
+
+using training-side reference prompts from the existing augmentation bank,
+minimal-pair rows, reverse-definition rows, and Boundary v1 technical rows.
+
+For the hard residuals G05 and G08 it reports:
+
+```text
+nearest concept centroid
+runner-up centroid
+top1-top2 cosine margin
+expected-concept cosine
+all six centroid similarities
+frozen intent-head technical probabilities
+```
+
+It also defines two semantic attribute directions:
+
+```text
+CPU general/control  <-> GPU parallel
+Transformer structure/model category <-> non-structure technical categories
+```
+
+and prints the target prompt projection on each direction together with anchor
+scores. This helps distinguish:
+
+```text
+encoder-side confusion
+vs.
+semantic-to-generation mapping failure
+```
+
+Run the focused G05/G08 diagnostic:
+
+```powershell
+git checkout v0.9
+git pull
+
+python semantic_probe_v09.py
+```
+
+To include all held-out technical cases:
+
+```powershell
+python semantic_probe_v09.py --all-tech-cases
+```
+
+No model parameters are updated and no new checkpoint is produced.
+
