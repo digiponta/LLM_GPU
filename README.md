@@ -5181,3 +5181,87 @@ semantic > 26/30 if possible
 strict > 26/30 if possible
 ```
 
+### v0.9.1 v0.10.1: LM Head LR Sweep
+
+v0.10 showed that LM-head learning rate `1e-6` produced almost the same
+behavior as the frozen-head v0.9 reference. v0.10.1 therefore sweeps only the
+LM-head learning rate while keeping all other conditions fixed.
+
+Sweep:
+
+```text
+1e-7
+3e-7
+1e-6
+3e-6
+1e-5
+```
+
+Fixed conditions:
+
+```text
+semantic teacher      : v0.8 constrained, frozen
+base model            : v0.8 pairwise-best
+Blocks 1-3            : frozen
+Blocks 4-6            : trainable @ 1e-5
+FinalNorm             : trainable @ 1e-5
+281 -> 256 projection : trainable @ 1e-3
+consistency head      : trainable @ 1e-3
+consistency weight    : 0.35
+LM Head               : trainable @ sweep LR
+```
+
+Each LR starts from the same base checkpoint and writes an independent model:
+
+```text
+model/model-gpu-v0.9.1-semantic-aware-lm-head-v0101-1e-7.pt
+model/model-gpu-v0.9.1-semantic-aware-lm-head-v0101-3e-7.pt
+model/model-gpu-v0.9.1-semantic-aware-lm-head-v0101-1e-6.pt
+model/model-gpu-v0.9.1-semantic-aware-lm-head-v0101-3e-6.pt
+model/model-gpu-v0.9.1-semantic-aware-lm-head-v0101-1e-5.pt
+```
+
+The runner records, for every LR:
+
+```text
+best epoch
+validation total loss
+validation LM loss
+validation semantic-consistency loss
+30-case semantic score
+30-case strict score
+legacy score
+G05 / G08 / G09 / G28 PASS/MISS
+generated answers for those hard cases
+```
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_semantic_aware_lm_head_sweep_v0101.py
+```
+
+Results:
+
+```text
+results/semantic_aware_lm_head_v0101_sweep/
+  train-1e-7.log
+  eval-1e-7.log
+  train-3e-7.log
+  eval-3e-7.log
+  train-1e-6.log
+  eval-1e-6.log
+  train-3e-6.log
+  eval-3e-6.log
+  train-1e-5.log
+  eval-1e-5.log
+  summary.csv
+```
+
+The sweep intentionally does not choose a winner automatically. The decision
+should consider validation loss, 30-case semantic/strict scores, and hard-case
+behavior together.
+
