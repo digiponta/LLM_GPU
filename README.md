@@ -4034,3 +4034,121 @@ Semantic-content >= 26/30
 Strict composite > 25/30 if possible
 ```
 
+### v0.9.1 Semantic Encoder Adapter v0.6: Instruction Semantics
+
+The G05 residual suggests that the model may still compress "instruction
+execution" toward "computation". v0.6 therefore refines CPU/GPU semantics
+before further generation-interface work.
+
+The existing v0.5 processor hierarchy is extended with two explicit axes:
+
+```text
+processor
+├─ CPU branch
+│  ├─ general-purpose
+│  ├─ control-oriented
+│  └─ heterogeneous-instruction
+│
+└─ GPU branch
+   ├─ throughput-oriented
+   ├─ data-parallel
+   └─ homogeneous-computation
+```
+
+CPU supervision now explicitly teaches that instructions include more than
+arithmetic:
+
+```text
+arithmetic / logic
+branch / jump
+compare
+load / store
+memory access
+call / return
+interrupt
+I/O control
+OS / control flow
+```
+
+The intended distinction is:
+
+```text
+CPU
+  = flexible execution of heterogeneous instruction types,
+    including control and memory operations
+
+GPU
+  = high-throughput parallel execution of many similar computations
+```
+
+This experiment continues from semantic adapter v0.5. The base v0.8 encoder
+remains frozen.
+
+New hierarchy labels:
+
+```text
+heterogeneous_instruction
+homogeneous_computation
+```
+
+The new instruction-contrast objective enforces:
+
+```text
+CPU examples:
+heterogeneous_instruction + general_purpose + control_oriented
+  >
+homogeneous_computation + throughput_oriented + data_parallel
+
+GPU examples:
+homogeneous_computation + throughput_oriented + data_parallel
+  >
+heterogeneous_instruction + general_purpose + control_oriented
+```
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_semantic_encoder_adapter_v06.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v0.9.1-semantic-adapter-v06.pt
+```
+
+Logs:
+
+```text
+results/semantic_encoder_adapter_v06/train.log
+results/semantic_encoder_adapter_v06/eval.log
+```
+
+The evaluation includes direct probes for:
+
+```text
+G05
+non-arithmetic instructions
+heterogeneous CPU instructions
+homogeneous GPU computation
+GPU throughput
+```
+
+Primary gate:
+
+```text
+G05 centroid -> CPU
+G05 heterogeneous_instruction > homogeneous_computation
+non-arithmetic instruction probe -> CPU-like
+heterogeneous instruction probe -> CPU-like
+homogeneous computation probe -> GPU-like
+G08 Transformer retained
+technical held-out accuracy does not regress
+```
+
+Generation is intentionally not retrained in this step. The semantic definition
+is validated first.
+
