@@ -790,3 +790,50 @@ The key v0.7 questions are:
    multi-character sequences become single tokens?
 4. Does evaluation improve beyond the v0.6 70% result without increasing the
    Transformer depth or width?
+
+
+### v0.7.1 targeted refinement
+
+After v0.7 reached 9/10 on the original conversational regression set, the
+remaining clear semantic error was confusion among closely related technical
+terms (for example GPU versus LLM). The v0.7 branch therefore adds a targeted
+refinement without changing model width, depth, context length, or tokenizer.
+
+Changes:
+
+- added contrastive paraphrases for GPU / CPU / LLM / Transformer / CUDA /
+  Python,
+- added explicit "X is not Y" distinction examples,
+- changed SFT validation from a global random split to an intent-stratified
+  split,
+- reduced default SFT label smoothing from 0.05 to 0.02,
+- kept the original 10-case regression benchmark,
+- added a separate six-case Technical contrast diagnostic.
+
+Because the BPE tokenizer was trained before these new examples were added,
+two experiment modes are possible.
+
+For the fastest targeted refinement, reuse the existing v0.7 pretrained BPE
+checkpoint and rerun only SFT:
+
+```powershell
+git checkout v0.7
+git pull
+python train_sft_v07.py
+python evaluate_chat.py
+```
+
+For a fully controlled v0.7.1-style experiment in which the BPE vocabulary and
+mixed pretraining also see the new technical examples, retrain from scratch:
+
+```powershell
+Remove-Item model\tokenizer-v0.7-bpe.json -ErrorAction SilentlyContinue
+Remove-Item model\model-gpu-v0.7-pretrain.pt -ErrorAction SilentlyContinue
+Remove-Item model\model-gpu-v0.7-chat.pt -ErrorAction SilentlyContinue
+
+python train_mixed_v07.py
+python train_sft_v07.py
+python evaluate_chat.py
+```
+
+The second procedure is the clean comparison against the previous v0.7 result.
