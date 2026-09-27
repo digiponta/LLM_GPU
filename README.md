@@ -6827,3 +6827,102 @@ Log:
 ```text
 results/output_alignment_v097/run.log
 ```
+### v0.9.8 Semantic Entity Logit Alignment
+
+v0.9.7 improved semantic separation enough that Original G05 reached
+`tech_cpu > tech_gpu`, while generation still produced the GPU answer.
+v0.9.8 therefore adds an explicit causal objective from semantic technical
+states to entity output-token logits.
+
+Entities:
+
+```text
+tech_cpu         -> CPU
+tech_gpu         -> GPU
+tech_llm         -> LLM
+tech_transformer -> Transformer
+tech_cuda        -> CUDA
+tech_python      -> Python
+```
+
+For rows with exactly one technical entity tag, the target entity first-token
+logit is trained to exceed all competing entity logits by a margin.
+
+For rows whose gold answer actually starts with that entity, an additional
+top-blocker margin requires the target entity token to exceed the strongest
+non-target vocabulary token. This blocker objective is deliberately restricted
+so ordinary descriptive answers are not all forced to start with an entity name.
+
+Training objective:
+
+```text
+Loss = LM loss
+     + 0.10 * semantic loss
+     + 0.20 * entity contrastive margin loss
+     + 0.05 * top-blocker margin loss
+     + LM-head anchor
+```
+
+Default margins:
+
+```text
+entity-vs-entity margin : 1.0
+entity-vs-top-blocker   : 0.25
+```
+
+The experiment continues from:
+
+```text
+model/model-gpu-v0.9.7-output-aligned.pt
+```
+
+and saves:
+
+```text
+model/model-gpu-v0.9.8-entity-logit-aligned.pt
+```
+
+Exact fixed 30-case benchmark prompts remain excluded from training.
+
+New files:
+
+```text
+entity_logit_alignment_v098.py
+train_entity_logit_alignment_v098.py
+evaluate_entity_logit_alignment_v098.py
+run_entity_logit_alignment_v098.py
+```
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_entity_logit_alignment_v098.py
+```
+
+The focused evaluator prints:
+
+```text
+Sem     : adapted semantic probabilities
+Entity  : CPU/GPU/LLM/Transformer/CUDA/Python first-token logits
+Top-1   : strongest token over the entire vocabulary
+Reply   : deterministic greedy generation
+```
+
+The key diagnostic is G05:
+
+```text
+Desired causal chain:
+
+semantic state -> tech_cpu
+               -> logit(CPU) > logit(GPU)
+               -> CPU reaches or approaches global top-1
+               -> CPU-like generation
+```
+
+If entity ordering improves but global top-1 remains an unrelated blocker,
+the next problem is full-vocabulary prior suppression rather than entity
+confusion. If CPU becomes global top-1 but the continuation still collapses,
+the remaining issue is post-first-token continuation rather than retrieval.
