@@ -89,7 +89,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--targeted-boundary",
         action="store_true",
-        help="Include v0.9 targeted boundary rows in SFT augmentation.",
+        help="Include v0.9 targeted boundary v1 rows in SFT augmentation.",
+    )
+    p.add_argument(
+        "--targeted-boundary-v2",
+        action="store_true",
+        help="Include v0.9 targeted boundary v2 rows in SFT augmentation.",
     )
     return p.parse_args()
 
@@ -371,6 +376,7 @@ def main() -> None:
         base_pairs,
         variants_per_intent=args.variants_per_intent,
         include_targeted_boundary=args.targeted_boundary,
+        include_targeted_boundary_v2=args.targeted_boundary_v2,
     )
 
     train_rows, val_rows = stratified_split(
@@ -453,7 +459,8 @@ def main() -> None:
     print("Projection alpha      :", args.alpha)
     print("Projection LR         :", args.projection_lr)
     print("Block/FinalNorm LR    :", args.block_lr)
-    print("Targeted boundary     :", args.targeted_boundary)
+    print("Targeted boundary v1  :", args.targeted_boundary)
+    print("Targeted boundary v2  :", args.targeted_boundary_v2)
     print(
         "Projection params     :",
         sum(p.numel() for p in projection.parameters()),
