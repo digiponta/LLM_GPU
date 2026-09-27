@@ -5456,3 +5456,64 @@ semantic >= 26/30 if possible
 strict >= 26/30 if possible
 ```
 
+### v0.9.1 v0.11.1: G05 Name-Request Evaluation
+
+This is an evaluation-only experiment. No model parameters are changed.
+
+It compares the original G05 wording:
+
+```text
+コンピュータの中心で多様な命令を処理する装置は何ですか。
+```
+
+with a minimally modified prompt that explicitly requests the entity name:
+
+```text
+コンピュータの中心で多様な命令を処理する装置の名前は何ですか。
+```
+
+Both prompts use exactly the same v0.11 checkpoint, semantic adapter,
+CPU name-binding checkpoint, greedy decoding, and repetition penalty.
+
+The evaluator reports:
+
+```text
+generated reply
+CPU lexical similarity
+GPU lexical similarity
+CPU-GPU lexical margin
+whether the answer explicitly contains:
+  CPU
+  Central Processing Unit
+  中央処理装置
+  中央演算処理装置
+```
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_g05_name_request_v0111.py
+```
+
+Log:
+
+```text
+results/g05_name_request_v0111/eval.log
+```
+
+Interpretation:
+
+```text
+old G05 MISS + name-request G05 PASS
+  -> answer-type / entity-request wording is a major factor
+
+old G05 MISS + name-request G05 MISS
+  -> lexical identity is present but generation still does not act on it
+```
+
+The fixed 30-case benchmark is intentionally left unchanged until this
+controlled prompt comparison is measured.
+
