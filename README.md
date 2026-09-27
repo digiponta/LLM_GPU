@@ -2638,3 +2638,92 @@ The main targets are G05 CPU reverse identification and G08 Transformer
 category completion. The experiment also watches for regressions on Python,
 GPU/CPU, topic, end, repeat, and compare.
 
+### v0.9 Intent Representation v2.1: Semantic Bottleneck
+
+Intent Representation v2 kept the overall score at 25/30 but did not improve
+G05 CPU or G08 Transformer, and it introduced a G02 GPU regression. Its direct
+280 -> 256 projection contains 71,680 trainable parameters and reached its best
+validation loss at epoch 1, suggesting that the semantic path may be too large
+for the available Boundary v1 training data.
+
+v2.1 therefore compresses the frozen semantic hidden state before fusion:
+
+```text
+256-d frozen semantic hidden
+  -> Linear(256 -> 32)
+  -> tanh
+  -> 32-d semantic feature
+
+24-d intent probabilities
++
+32-d semantic feature
+=
+56-d fused representation
+  -> zero-initialized Linear(56 -> 256)
+  -> alpha scaling
+  -> inject after Block 3
+```
+
+Projection-side trainable parameters:
+
+```text
+semantic bottleneck : 256 x 32 = 8,192
+fusion projection   : 56 x 256 = 14,336
+total               : 22,528
+```
+
+This is substantially smaller than the v2 direct fusion path:
+
+```text
+v2   : 71,680 parameters
+v2.1 : 22,528 parameters
+```
+
+Fixed experiment settings:
+
+```text
+Boundary data        : v1 only
+Semantic bottleneck  : 32
+Projection LR        : 1e-3
+Blocks 4-6 LR        : 1e-5
+FinalNorm LR         : 1e-5
+LM Head              : frozen
+Alpha                : 0.1
+Inject after         : Block 3
+Intent model/head    : frozen
+```
+
+Run:
+
+```powershell
+git checkout v0.9
+git pull
+
+python run_intent_representation_v21_v09.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v0.9-intent-representation-v21.pt
+```
+
+Logs:
+
+```text
+results/intent_representation_v21_v09/train.log
+results/intent_representation_v21_v09/eval.log
+```
+
+Reference:
+
+```text
+Boundary v1 Semantic : 25/30 = 83.3%
+Boundary v1 Strict   : 25/30 = 83.3%
+Intent Rep v2        : 25/30 = 83.3%
+```
+
+Primary targets remain G05 CPU reverse identification and G08 Transformer
+category completion. G02 GPU and the short/repeat/end control intents are
+explicit regression-watch cases.
+
