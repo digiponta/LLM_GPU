@@ -65,6 +65,15 @@ def parse_args() -> argparse.Namespace:
             "definition binding can be evaluated independently."
         ),
     )
+    p.add_argument(
+        "--replay-repeat",
+        type=int,
+        default=2,
+        help=(
+            "Training-only replay factor for protected nontechnical intents "
+            "(debug/error, repeat, topic). Default 2 adds one replay copy."
+        ),
+    )
     return p.parse_args()
 
 
@@ -359,6 +368,32 @@ def oversample_technical_rows(
                 output.append(row)
     return output
 
+
+
+REPLAY_TAGS = {
+    "debug_error",
+    "control_repeat",
+    "control_topic",
+}
+
+
+def oversample_replay_rows(
+    rows: Sequence[Tuple[str, str, Tuple[str, ...]]],
+    repeat: int,
+) -> List[Tuple[str, str, Tuple[str, ...]]]:
+    """Replay protected nontechnical intents in training only."""
+    if repeat < 1:
+        raise ValueError("--replay-repeat must be >= 1.")
+
+    output = []
+    for row in rows:
+        output.append(row)
+        if any(tag in REPLAY_TAGS for tag in row[2]):
+            for _ in range(repeat - 1):
+                output.append(row)
+    return output
+
+
 def main() -> None:
     args = parse_args()
     torch.manual_seed(SEED)
@@ -415,6 +450,11 @@ def main() -> None:
         train_rows,
         repeat=args.technical_repeat,
     )
+    technical_train_count = len(train_rows)
+    train_rows = oversample_replay_rows(
+        train_rows,
+        repeat=args.replay_repeat,
+    )
     pos_weight = compute_pos_weight(train_rows, labels, device)
 
     train_set = MultiTaskDataset(
@@ -460,8 +500,11 @@ def main() -> None:
     print("Intent tags        :", len(labels))
     print("Intent tag names   :", ", ".join(labels))
     print("Train rows (base)  :", original_train_count)
-    print("Train rows (bound) :", len(train_rows))
+    print("After technical    :", technical_train_count)
+    print("Train rows (final) :", len(train_rows))
     print("Technical repeat   :", args.technical_repeat)
+    print("Replay repeat      :", args.replay_repeat)
+    print("Replay tags        :", ", ".join(sorted(REPLAY_TAGS)))
     print("Validation rows    :", len(val_rows))
     print("Multi-label weight :", args.intent_loss_weight)
     print(
