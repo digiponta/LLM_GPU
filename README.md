@@ -1199,3 +1199,95 @@ sample is twice that of the 256-token v0.7 setup. Therefore the experiment is
 best interpreted as a practical capacity-and-context scaling test rather than a
 perfect single-variable parameter-count ablation.
 
+### v0.8 technical concept binding refinement
+
+After v0.8 reached 19/30 (63.3%) on the fixed held-out generalization set,
+the architecture is kept unchanged and only technical concept binding is
+refined.
+
+The target concepts are:
+
+```text
+GPU
+CPU
+LLM
+Transformer
+CUDA
+Python
+```
+
+The refinement uses matched minimal-pair prompt structures. Each concept is
+trained with the same question forms, while the canonical answer changes with
+the concept. Canonical answers explicitly repeat the concept name so the model
+must bind the entity to its defining property rather than emit only a generic
+property phrase.
+
+Example pattern:
+
+```text
+GPUの中心的な役割を説明してください。
+→ GPUの中心的な役割は大量の並列計算を効率よく処理することです。
+
+CPUの中心的な役割を説明してください。
+→ CPUの中心的な役割は多様な命令を実行し、汎用処理を制御することです。
+
+LLMの中心的な役割を説明してください。
+→ LLMの中心的な役割は言語を理解し、文章を生成することです。
+
+Transformerの中心的な役割を説明してください。
+→ Transformerの中心的な役割はAttentionで情報間の関係を処理することです。
+```
+
+Technical rows are also oversampled in the training split only:
+
+```text
+--technical-repeat 3
+```
+
+Validation rows are not duplicated. This keeps the validation distribution
+unchanged while giving the six technical concepts stronger gradient exposure.
+
+No architecture constants were changed:
+
+```text
+d_model       : 256
+layers        : 6
+heads         : 8
+FFN           : 1024
+context       : 512
+tokenizer     : fixed v0.7 BPE
+```
+
+The new minimal-pair prompts were checked against both the fixed regression set
+and the 30-case held-out generalization set; there are no exact prompt
+overlaps.
+
+Because only SFT data weighting and augmentation changed, v0.8 pretraining does
+not need to be repeated. Run:
+
+```powershell
+git checkout v0.8
+git pull
+
+python train_sft_v08.py
+python evaluate_chat.py
+python evaluate_generalization_v07.py
+```
+
+The baseline to beat remains:
+
+```text
+v0.8 before binding refinement: 19/30 = 63.3%
+```
+
+For an ablation, the training-only technical emphasis can be changed without
+modifying the data:
+
+```powershell
+python train_sft_v08.py --technical-repeat 1
+python train_sft_v08.py --technical-repeat 2
+python train_sft_v08.py --technical-repeat 3
+```
+
+`1` disables technical oversampling; `3` is the default.
+
