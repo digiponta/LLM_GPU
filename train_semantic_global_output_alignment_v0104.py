@@ -320,6 +320,10 @@ def evaluate(
     alignment_weight,
     alignment_margin,
     alignment_confidence,
+    global_alignment_weight,
+    global_alignment_margin,
+    continuation_weight,
+    continuation_tokens,
 ):
     generation_model.eval()
     projection.eval()
