@@ -5703,3 +5703,87 @@ G10 -> Python
 G27 -> GPU
 G28 -> CPU
 ```
+### v0.9.1 v0.12.2: Entity Contrastive Logit Alignment
+
+v0.12.1 showed that explicit entity supervision improved CPU rank on G05,
+but CPU still did not outrank GPU and the adapter over-fired on non-entity
+questions.
+
+v0.12.2 changes the objective from absolute entity promotion to relative
+entity competition.
+
+Core objective:
+
+```text
+correct entity logit
+  >
+every competing entity logit + margin
+```
+
+For CPU/GPU this explicitly includes:
+
+```text
+CPU prompt : logit(CPU) >= logit(GPU) + margin
+GPU prompt : logit(GPU) >= logit(CPU) + margin
+```
+
+The loss combines:
+
+```text
+contrastive margin loss over the 6 entity first-token logits
++ 0.5 * entity classification loss
++ gate loss
++ small direct-bias L2 regularization
+```
+
+A learned entity gate suppresses the direct logit intervention on non-entity
+questions.
+
+```text
+entity question     -> gate ~ 1
+non-entity question -> gate ~ 0
+```
+
+Non-entity gate examples include debugging, comparison, topic-change, repeat,
+fatigue, thanks, and short-answer requests. Exact fixed 30-case prompts remain
+excluded from training, including G05.
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_entity_contrastive_logit_alignment_v0122.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v0.9.1-entity-contrastive-logit-v0122.pt
+```
+
+Logs:
+
+```text
+results/entity_contrastive_logit_v0122/train.log
+results/entity_contrastive_logit_v0122/eval.log
+```
+
+The evaluator reports the gate value for all 30 benchmark cases and, for both
+G05 variants, the CPU/GPU base logits, effective biases, final logits, ranks,
+and CPU-GPU margins.
+
+Primary targets:
+
+```text
+Original G05: CPU final logit > GPU final logit
+Name-request G05: CPU final logit > GPU final logit
+G05 generation -> CPU
+non-entity gate low on error / compare / topic / repeat
+G08 -> Transformer
+G09 -> CUDA
+G10 -> Python
+G27 -> GPU
+G28 -> CPU
+```
