@@ -406,6 +406,100 @@ def technical_minimal_pairs() -> List[Tuple[str, str, str]]:
     return rows
 
 
+
+
+# v0.8 reverse-definition binding.
+# Prompts deliberately omit the target concept name. The model must infer the
+# entity from its defining properties and produce the canonical concept name.
+# These rows target the concepts that remained weak in the refined evaluator.
+REVERSE_DEFINITION_ROWS: Sequence[Tuple[str, str, str]] = [
+    # GPU / CPU reverse identification
+    (
+        "大量の同種計算を同時並行で処理するのが得意な演算装置は何ですか。",
+        "GPUです。GPUは大量の並列計算を得意とする演算装置です。",
+        "tech_gpu",
+    ),
+    (
+        "多数の計算を並列に処理して機械学習を高速化する装置は何ですか。",
+        "GPUです。GPUは多数の計算を並列に処理することを得意とします。",
+        "tech_gpu",
+    ),
+    (
+        "汎用処理や複雑な命令実行、制御を主に担当する演算装置は何ですか。",
+        "CPUです。CPUは汎用処理や制御を担当する演算装置です。",
+        "tech_cpu",
+    ),
+    (
+        "コンピュータで多様な命令を順序立てて実行する中心的な装置は何ですか。",
+        "CPUです。CPUは多様な命令を実行し、汎用処理を担当します。",
+        "tech_cpu",
+    ),
+
+    # Transformer reverse identification
+    (
+        "Attentionを主要な仕組みとして文脈中の情報関係を扱うモデル構造は何ですか。",
+        "Transformerです。TransformerはAttentionを中心に文脈を処理するモデル構造です。",
+        "tech_transformer",
+    ),
+    (
+        "Self-Attentionを使って系列中の要素同士の関係を処理する代表的な構造は何ですか。",
+        "Transformerです。TransformerはAttentionを中心とするニューラルネットワーク構造です。",
+        "tech_transformer",
+    ),
+    (
+        "RNNの逐次処理に頼らずAttentionを中心に系列を扱う構造を何と呼びますか。",
+        "Transformerです。TransformerはAttentionを利用して系列を処理するモデル構造です。",
+        "tech_transformer",
+    ),
+
+    # CUDA reverse identification
+    (
+        "NVIDIAのGPUを一般的な計算処理に利用するための計算基盤は何ですか。",
+        "CUDAです。CUDAはNVIDIA GPUを汎用計算に利用するための技術です。",
+        "tech_cuda",
+    ),
+    (
+        "NVIDIA製GPU上で汎用的なプログラムを実行するための技術は何ですか。",
+        "CUDAです。CUDAはNVIDIA GPU向けの汎用計算技術です。",
+        "tech_cuda",
+    ),
+    (
+        "NVIDIA GPUをGPGPU用途で利用するための代表的なプラットフォームは何ですか。",
+        "CUDAです。CUDAはNVIDIA GPUを汎用計算に使うための計算基盤です。",
+        "tech_cuda",
+    ),
+
+    # Python reverse identification
+    (
+        "読みやすい文法と幅広い用途で知られる汎用プログラミング言語は何ですか。",
+        "Pythonです。Pythonは読みやすい文法を持つ汎用プログラミング言語です。",
+        "tech_python",
+    ),
+    (
+        "簡潔で読みやすい記述が特徴の汎用プログラミング言語を一つ挙げてください。",
+        "Pythonです。Pythonは幅広い用途で使われる汎用プログラミング言語です。",
+        "tech_python",
+    ),
+    (
+        "機械学習やデータ処理でも広く使われる読みやすい汎用言語は何ですか。",
+        "Pythonです。Pythonは汎用プログラミング言語です。",
+        "tech_python",
+    ),
+
+    # Hard-negative selection: same relation, opposite answer.
+    (
+        "大量の並列計算と汎用制御のうち、前者を得意とする装置はCPUとGPUのどちらですか。",
+        "GPUです。GPUは大量の並列計算を得意とします。",
+        "tech_gpu",
+    ),
+    (
+        "大量の並列計算と汎用制御のうち、後者を主に担当する装置はCPUとGPUのどちらですか。",
+        "CPUです。CPUは汎用処理や制御を担当します。",
+        "tech_cpu",
+    ),
+]
+
+
 RELATION_AUGMENT_ROWS: Sequence[Tuple[str, str]] = [
     (
         "CPUとGPUの役割の違いを説明してください。",
@@ -472,6 +566,9 @@ def augment_pairs(
         add(prompt, answer)
 
     for prompt, answer, label in technical_minimal_pairs():
+        add(prompt, answer, label)
+
+    for prompt, answer, label in REVERSE_DEFINITION_ROWS:
         add(prompt, answer, label)
 
     for prompt, answer in RELATION_AUGMENT_ROWS:
