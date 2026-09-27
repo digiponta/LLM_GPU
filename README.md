@@ -4349,3 +4349,119 @@ homogeneous computation probes -> GPU-like
 
 Generation remains untouched until this local binding gate is evaluated.
 
+### v0.9.1 Semantic Adapter v0.6.2 -> Original v0.9 Generation Integration
+
+This experiment reconnects the completed Instruction Semantics adapter v0.6.2
+to the original v0.9 additive generation integration.
+
+The purpose is a controlled comparison: only the semantic representation is
+updated, while the generation-side architecture and training policy remain the
+same as the original v0.9 integration.
+
+Semantic source:
+
+```text
+v0.8 base encoder
+  -> Semantic Adapter v0.6.2
+  -> adapted hidden        256
+  -> concept probabilities   6
+  -> attribute probabilities 4
+  -> hierarchy probabilities 7
+                            ---
+                            273 dims
+```
+
+The hierarchy now contains:
+
+```text
+processor
+general_purpose
+control_oriented
+throughput_oriented
+data_parallel
+heterogeneous_instruction
+homogeneous_computation
+```
+
+Generation interface:
+
+```text
+273-d semantic feature
+  -> zero-init Linear(273 -> 256)
+  -> alpha = 0.1
+  -> inject after Block 3
+  -> Blocks 4-6
+  -> FinalNorm
+  -> LM Head
+```
+
+Controlled training policy:
+
+```text
+semantic encoder          : frozen
+semantic adapter v0.6.2  : frozen
+semantic heads            : frozen
+hierarchy head            : frozen
+
+generation Blocks 1-3     : frozen
+generation Blocks 4-6     : trainable
+FinalNorm                 : trainable
+LM Head                   : frozen
+
+Boundary data             : v1 only
+projection LR             : 1e-3
+block LR                  : 1e-5
+alpha                     : 0.1
+```
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_semantic_generation_v062.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v0.9.1-semantic-generation-v062.pt
+```
+
+Logs:
+
+```text
+results/semantic_generation_v062/train.log
+results/semantic_generation_v062/eval.log
+```
+
+The evaluator uses the unchanged fixed 30-case benchmark and prints all seven
+hierarchy signals for G05, G08, G09, and G28.
+
+Primary questions:
+
+```text
+Does G05 generation finally become CPU-correct?
+Does G05 keep heterogeneous_instruction > homogeneous_computation?
+Does G08 remain Transformer-correct?
+Does G09 CUDA remain correct?
+Does the 30-case score meet or exceed the original v0.9 integration?
+```
+
+Reference:
+
+```text
+original v0.9 integration (semantic v0.5)
+  semantic : 26/30
+  strict   : 25/30
+
+v0.8 balanced semantic tokens
+  semantic : 25/30
+  strict   : 25/30
+
+v0.9 cross-attention
+  semantic : 25/30
+  strict   : 25/30
+```
+
