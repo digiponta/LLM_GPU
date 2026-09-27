@@ -1437,3 +1437,77 @@ git pull
 python evaluate_generalization_v07.py
 ```
 
+### v0.8 reverse-definition binding
+
+The v0.8 architecture and the fixed 30-case evaluator remain unchanged.
+This refinement targets semantic reverse lookup: infer the concept name from a
+description that does not explicitly contain the name.
+
+Fifteen training rows were added for the weak concepts:
+
+```text
+GPU
+CPU
+Transformer
+CUDA
+Python
+```
+
+Examples:
+
+```text
+Attentionを主要な仕組みとして文脈中の情報関係を扱うモデル構造は何ですか。
+→ Transformerです。TransformerはAttentionを中心に文脈を処理するモデル構造です。
+
+NVIDIAのGPUを一般的な計算処理に利用するための計算基盤は何ですか。
+→ CUDAです。CUDAはNVIDIA GPUを汎用計算に利用するための技術です。
+
+読みやすい文法と幅広い用途で知られる汎用プログラミング言語は何ですか。
+→ Pythonです。Pythonは読みやすい文法を持つ汎用プログラミング言語です。
+```
+
+Two hard-negative CPU/GPU selection examples are also included so that the
+same comparison structure leads to opposite answers depending on the semantic
+property.
+
+The reverse-definition prompts have no exact prompt overlap with the fixed
+30-case generalization benchmark.
+
+To isolate this refinement from the previous oversampling experiment,
+`--technical-repeat` now defaults to:
+
+```text
+1
+```
+
+which disables broad technical oversampling. The architecture is unchanged:
+
+```text
+d_model       : 256
+layers        : 6
+heads         : 8
+FFN           : 1024
+context       : 512
+tokenizer     : fixed v0.7 BPE
+```
+
+Pretraining does not need to be repeated. Run only SFT and evaluation:
+
+```powershell
+git checkout v0.8
+git pull
+
+python train_sft_v08.py
+python evaluate_chat.py
+python evaluate_generalization_v07.py
+```
+
+The refined evaluator should be used for comparison. The current pre-refinement
+baseline is:
+
+```text
+Semantic-content : 18/30 = 60.0%
+Strict composite : 16/30 = 53.3%
+Fluency          : 29/30 = 96.7%
+```
+
