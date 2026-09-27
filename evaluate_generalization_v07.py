@@ -1,6 +1,6 @@
 # evaluate_generalization_v07.py
 #
-# Held-out paraphrase generalization test for LLM_GPU v0.7.
+# Held-out paraphrase generalization test for LLM_GPU v0.8.
 # IMPORTANT: Prompts in this file are intentionally different from the
 # training examples in conversation-ja.txt and instruction-ja.txt.
 
@@ -18,7 +18,7 @@ from tokenizer_bpe import Tokenizer
 
 
 DEFAULT_TOKENIZER = "model/tokenizer-v0.7-bpe.json"
-DEFAULT_MODEL = "model/model-gpu-v0.7-chat.pt"
+DEFAULT_MODEL = "model/model-gpu-v0.8-chat.pt"
 
 
 CASES: List[Dict[str, object]] = [
@@ -131,7 +131,7 @@ def main() -> None:
 
     print()
     print("====================================")
-    print(" LLM_GPU v0.7 Generalization Test")
+    print(" LLM_GPU v0.8 Generalization Test")
     print("====================================")
     print("Device          :", device)
     print("Checkpoint loss :", checkpoint.get("loss"))
