@@ -2341,3 +2341,79 @@ The 21 v2 prompts were checked against the unchanged fixed 30 development
 prompts and have zero exact prompt overlap. Child-process output is forced to
 UTF-8 on Windows.
 
+### v0.9 Targeted Boundary Training v3 + Protected Replay
+
+Boundary v2 remained at:
+
+```text
+Semantic-content : 25/30 = 83.3%
+Strict composite : 25/30 = 83.3%
+```
+
+but improved `repeat` and the "continue later" form of `end` while
+regressing Python and the immediate-stop form of `end`. This indicates
+training interference rather than simple lack of boundary data.
+
+v3 therefore keeps Boundary v1 + v2 and adds a small protected replay set for:
+
+```text
+Python
+GPU/CPU relation
+topic switching
+end-now
+continue-later
+```
+
+The protected set contains 13 prompts and is replayed in the training split
+with:
+
+```text
+--protected-replay-repeat 3
+```
+
+It is deliberately separate from the normal replay tags, so this experiment
+tests targeted anti-forgetting rather than broad oversampling.
+
+Fixed settings:
+
+```text
+block LR        : 1e-5
+projection LR   : 1e-3
+alpha           : 0.1
+inject-after    : Block 3
+boundary v1     : enabled
+boundary v2     : enabled
+protected replay: enabled
+protected repeat: 3
+LM Head         : frozen
+```
+
+Run:
+
+```powershell
+git checkout v0.9
+git pull
+
+python run_targeted_boundary_v3_v09.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v0.9-partial-intent-boundary-v3.pt
+```
+
+Logs:
+
+```text
+results/targeted_boundary_v3_v09/train.log
+results/targeted_boundary_v3_v09/eval.log
+```
+
+The 13 protected replay prompts have zero exact prompt overlap with the fixed
+30 development prompts. Windows child-process output is forced to UTF-8.
+
+The main goal is to retain the v2 gains on `repeat` and `end` while
+restoring Python and preserving GPU/CPU and topic performance. Residual hard
+cases G05 CPU, G08 Transformer, and G12 short should be monitored separately.
+
