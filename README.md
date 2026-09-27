@@ -1032,3 +1032,73 @@ Technical semantic rate        : preserve 6/6 if possible
 Generalization semantic rate   : improve substantially beyond 7/30
 ```
 
+### v0.7 multi-label intent learning
+
+The intent auxiliary task has been upgraded from one-label classification to
+multi-label semantic tagging.
+
+A prompt may now carry several tags simultaneously. Example:
+
+```text
+CPUとGPUのどちらが並列計算向きですか。
+
+tags:
+  tech_cpu
+  tech_gpu
+  relation_compare
+  relation_distinction
+  property_parallel
+```
+
+Another example:
+
+```text
+LLMとTransformerは同じ意味ですか。
+
+tags:
+  tech_llm
+  tech_transformer
+  relation_compare
+  relation_distinction
+```
+
+The auxiliary classifier therefore uses a multi-hot target and
+`BCEWithLogitsLoss` instead of single-class cross entropy.
+
+Because most tags are absent from any one prompt, positive-class weights are
+computed from the training split and capped at 10.0 to reduce all-zero bias.
+Training reports multi-label micro-F1 rather than ordinary class accuracy.
+
+```text
+total_loss
+  = assistant LM loss
+  + 0.25 * weighted multi-label BCE loss
+```
+
+Additional relation-oriented augmentation covers CPU/GPU, LLM/Transformer,
+CUDA/GPU, and Python/CUDA comparisons. These relation prompts were checked
+against the 30 held-out generalization prompts; there are no exact overlaps.
+
+Run:
+
+```powershell
+git checkout v0.7
+git pull
+
+python train_sft_v07.py
+python evaluate_chat.py
+python evaluate_generalization_v07.py
+```
+
+Expected training diagnostics now include:
+
+```text
+Intent tags        : ...
+Positive weights   : min=... max=...
+train=... lm=... intent=... tag_f1=...
+val=...   lm=... intent=... tag_f1=...
+```
+
+The intent head remains auxiliary. Normal `chat.py` inference continues to
+use only the language model checkpoint.
+
