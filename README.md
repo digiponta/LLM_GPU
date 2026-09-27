@@ -7137,3 +7137,82 @@ If the correct entity is selected but continuation is malformed:
 If non-entity prompts are incorrectly gated:
   -> answer-mode classification needs a better decision boundary.
 ```
+
+### v0.10.2: Semantic Consistency Weight Sweep
+
+The v0.10.1 LM-head LR sweep showed a clear plateau:
+
+```text
+LM Head LR    Semantic    Strict    G05    G08    G09    G28
+1e-7          26/30       26/30     MISS   MISS   PASS   PASS
+3e-7          26/30       26/30     MISS   MISS   PASS   PASS
+1e-6          26/30       26/30     MISS   MISS   PASS   PASS
+3e-6          26/30       26/30     MISS   MISS   PASS   PASS
+1e-5          25/30       25/30     MISS   MISS   PASS   MISS
+```
+
+This indicates that changing only the LM-head learning rate does not correct
+the remaining G05/G08 semantic failures. v0.10.2 therefore fixes the LM-head
+LR at `3e-6`, the strongest tested value before benchmark regression, and
+sweeps only the semantic-consistency loss weight.
+
+Sweep:
+
+```text
+0.10
+0.20
+0.35
+0.50
+0.75
+1.00
+```
+
+Fixed conditions:
+
+```text
+semantic teacher      : v0.8 constrained, frozen
+base model            : v0.8 pairwise-best
+Blocks 1-3            : frozen
+Blocks 4-6            : trainable @ 1e-5
+FinalNorm             : trainable @ 1e-5
+281 -> 256 projection : trainable @ 1e-3
+consistency head      : trainable @ 1e-3
+LM Head               : trainable @ 3e-6
+consistency weight    : sweep value
+```
+
+Each weight starts from the same base checkpoint and writes an independent
+checkpoint under:
+
+```text
+model/model-gpu-v0.10.2-consistency-weight-*.pt
+```
+
+Run:
+
+```powershell
+git checkout v0.10.2
+git pull
+
+python run_semantic_consistency_weight_sweep_v0102.py
+```
+
+Results are written to:
+
+```text
+results/semantic_consistency_weight_v0102_sweep/summary.csv
+```
+
+Primary success criteria:
+
+```text
+1. Recover G05 and/or G08.
+2. Preserve G09 and G28.
+3. Keep semantic and strict scores at least 26/30.
+4. Prefer a lower semantic-consistency validation loss without LM regression.
+```
+
+If higher consistency weight lowers semantic loss but G05/G08 remain MISS,
+the next experiment should change the semantic representation or supervision
+rather than further increasing LM-head learning rate.
+
