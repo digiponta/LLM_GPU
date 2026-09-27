@@ -6218,3 +6218,78 @@ If a moderate lambda makes G05 generate CPU while G08/G09/G10/G27/G28 remain sta
 If non-CPU cases regress because P(tech_cpu) is not selective enough:
   -> replace raw P(tech_cpu) with a learned or margin-based CPU-specific gate.
 ```
+### CPU/GPU Definition Correction v0.9.1
+
+The current repository data now contains correct CPU definitions, but the existing
+`model/model-gpu-v0.9-soft-intent.pt` checkpoint was trained before the latest
+CPU-definition symmetry additions. This experiment retrains only the v0.9
+soft-intent projection while keeping the v0.8 base model and intent head frozen.
+
+New CPU-direct training paraphrases include:
+
+```text
+CPUとは
+CPUとは何ですか。
+CPUって何ですか。
+CPUを簡単に説明して。
+CPUの定義を教えて。
+Central Processing Unitとは何ですか。
+```
+
+The corresponding answers consistently define CPU as a general-purpose / control-
+oriented processor that executes diverse instructions. GPU remains associated with
+large-scale parallel computation.
+
+New files:
+
+```text
+audit_cpu_gpu_training_data_v091.py
+evaluate_cpu_definition_projection_v091.py
+run_cpu_definition_correction_v091.py
+```
+
+The runner performs:
+
+```text
+1. CPU/GPU training-data audit
+2. projection-only v0.9 retraining
+3. deterministic CPU/GPU direct-definition evaluation
+```
+
+The original checkpoint is preserved. The corrected experiment writes:
+
+```text
+model/model-gpu-v0.9.1-soft-intent-cpu-definition.pt
+```
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_cpu_definition_correction_v091.py
+```
+
+Combined log:
+
+```text
+results/cpu_definition_correction_v091/run.log
+```
+
+Then test interactively with:
+
+```powershell
+python chat_v09.py --projection model/model-gpu-v0.9.1-soft-intent-cpu-definition.pt
+```
+
+Recommended first probe:
+
+```text
+CPUとは
+```
+
+If the direct CPU definition is corrected but G05 still fails, return to the
+v0.12.2 semantic/entity path. If even the corrected projection still maps
+`CPUとは` to the GPU definition, the remaining prior is inside the frozen v0.8
+base model and a base/SFT retraining experiment is justified.
