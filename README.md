@@ -886,3 +886,52 @@ This is still a lightweight rule-based regression test rather than a general
 semantic benchmark, but it avoids the main false-PASS failure found in the
 previous keyword-only evaluation.
 
+
+
+### Final v0.7 generalization hardening
+
+The final v0.7 refinement addresses two separate goals:
+
+1. reduce the local GPU/CPU confusion with symmetric training paraphrases;
+2. measure true paraphrase generalization on prompts not present in SFT data.
+
+Training data now contains balanced GPU/CPU examples covering role, strengths,
+parallel versus sequential processing, and explicit contrast. The wording is
+kept different from the generalization benchmark.
+
+A new independent evaluator is available:
+
+```powershell
+python evaluate_generalization_v07.py
+```
+
+It contains 30 held-out prompts spanning:
+
+- GPU / CPU and technical contrasts,
+- LLM / Transformer / CUDA / Python,
+- short-answer / topic-change / repeat / conversation-end controls,
+- debugging and research comparison,
+- simple facts and conversational intents.
+
+The script reports:
+
+```text
+Generalization semantic rate: ?/30
+Per-intent:
+...
+```
+
+For this final refinement, the existing BPE tokenizer and mixed-pretrained
+checkpoint may be reused because the vocabulary and architecture are unchanged.
+Only SFT needs to be rerun:
+
+```powershell
+git pull
+python train_sft_v07.py
+python evaluate_chat.py
+python evaluate_generalization_v07.py
+```
+
+For publication-quality comparison, keep both scores: the original regression
+set measures regression stability, while the held-out set measures paraphrase
+generalization.
