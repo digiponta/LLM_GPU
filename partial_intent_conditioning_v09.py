@@ -32,8 +32,9 @@ from model import LanguageModel
 def configure_partial_finetune(
     model: LanguageModel,
     inject_after: int,
+    unfreeze_lm_head: bool = False,
 ) -> None:
-    """Freeze everything except blocks after injection and final norm."""
+    """Freeze everything except late blocks/final norm and optional LM head."""
     for parameter in model.parameters():
         parameter.requires_grad_(False)
 
@@ -45,9 +46,8 @@ def configure_partial_finetune(
     for parameter in model.final_norm.parameters():
         parameter.requires_grad_(True)
 
-    # LM head intentionally remains frozen in the first partial-FT experiment.
     for parameter in model.lm_head.parameters():
-        parameter.requires_grad_(False)
+        parameter.requires_grad_(unfreeze_lm_head)
 
 
 def trainable_model_parameters(model: LanguageModel):
@@ -102,6 +102,8 @@ def save_partial_checkpoint(
     intent_head: str,
     block_learning_rate: float,
     projection_learning_rate: float,
+    lm_head_learning_rate: float = 0.0,
+    lm_head_trainable: bool = False,
 ) -> None:
     from pathlib import Path
 
@@ -124,7 +126,8 @@ def save_partial_checkpoint(
             "intent_head": intent_head,
             "block_learning_rate": float(block_learning_rate),
             "projection_learning_rate": float(projection_learning_rate),
-            "lm_head_trainable": False,
+            "lm_head_learning_rate": float(lm_head_learning_rate),
+            "lm_head_trainable": bool(lm_head_trainable),
         },
         path,
     )
