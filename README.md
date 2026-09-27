@@ -1368,3 +1368,72 @@ Legacy rule rate
 
 The 30 prompts themselves are unchanged.
 
+### v0.8 evaluator refinement: semantic slots and entity N/A
+
+The multidimensional evaluator has been tightened without changing any of the
+30 held-out prompts.
+
+#### Tri-state entity scoring
+
+Entity explicitness now uses three states:
+
+```text
+PASS  concept name was expected and explicitly present
+MISS  concept name was expected but omitted
+N/A   explicit entity repetition is not applicable
+```
+
+`N/A` is used when the prompt does not already name the entity and the task is
+to identify it. It does not count as a failure in the strict composite score.
+
+This prevents conversational, debugging, comparison, and name-identification
+questions from artificially inflating the entity-explicit rate.
+
+#### Stronger semantic slots
+
+Selected cases now require multiple semantic slots instead of passing from one
+broad keyword OR-group.
+
+Examples:
+
+```text
+Transformer:
+  Transformer
+  AND Attention
+  AND structure/model/neural-network category
+
+CUDA:
+  CUDA
+  AND GPU
+  AND technology/mechanism/general-computing category
+
+Python:
+  Python
+  AND language category
+
+Comparison:
+  comparison/difference action
+  AND common conditions/metrics
+```
+
+This specifically prevents malformed outputs that happen to contain a word such
+as `条件` from being counted as semantically correct.
+
+The summary remains backward compatible and reports:
+
+```text
+Semantic-content rate
+Entity-explicit rate (applicable cases only, with N/A count)
+Fluency rate
+Strict composite rate
+Legacy rule rate
+```
+
+Run:
+
+```powershell
+git checkout v0.8
+git pull
+python evaluate_generalization_v07.py
+```
+
