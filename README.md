@@ -1102,3 +1102,100 @@ val=...   lm=... intent=... tag_f1=...
 The intent head remains auxiliary. Normal `chat.py` inference continues to
 use only the language model checkpoint.
 
+## v0.8: Capacity Scaling Experiment
+
+v0.8 tests whether the remaining v0.7 generalization ceiling is primarily a
+model-capacity limitation.
+
+The tokenizer, SFT data, augmentation logic, multi-label intent objective, and
+held-out 30-case generalization benchmark are retained. The main change is the
+Transformer capacity.
+
+### Architecture
+
+```text
+                     v0.7            v0.8
+Tokenizer            BPE 8k          same v0.7 BPE
+d_model              128             256
+Layers               4               6
+Attention heads      4               8
+FFN dimension        512             1024
+Context length       256             512
+SFT objective        multi-label     multi-label
+```
+
+v0.8 intentionally reuses:
+
+```text
+model/tokenizer-v0.7-bpe.json
+```
+
+so tokenization does not become another experimental variable.
+
+v0.8 writes separate checkpoints:
+
+```text
+model/model-gpu-v0.8-pretrain.pt
+model/model-gpu-v0.8-chat.pt
+model/model-gpu-v0.8-intent-head.pt
+```
+
+### RTX 3070 Ti defaults
+
+Because attention memory grows strongly with context length, the default batch
+sizes are reduced:
+
+```text
+pretraining batch size : 16
+SFT batch size         : 8
+```
+
+If CUDA runs out of memory, reduce them further:
+
+```powershell
+python train_mixed_v08.py --batch-size 8
+python train_sft_v08.py --batch-size 4
+```
+
+### Smoke test
+
+Before the full run:
+
+```powershell
+git checkout v0.8
+git pull
+
+python train_mixed_v08.py --samples 20000
+python train_sft_v08.py
+python evaluate_chat.py
+python evaluate_generalization_v07.py
+```
+
+### Full experiment
+
+After the smoke test succeeds, rerun pretraining at the normal scale:
+
+```powershell
+python train_mixed_v08.py
+python train_sft_v08.py
+python evaluate_chat.py
+python evaluate_generalization_v07.py
+python chat.py
+```
+
+The 30 held-out prompts are unchanged from v0.7. The primary comparison is:
+
+```text
+v0.7 multi-label generalization : 16/30 = 53.3%
+v0.8 larger model               : to be measured
+```
+
+The experiment asks whether increasing width, depth, attention heads, and
+context can improve unseen paraphrase generalization while preserving the
+existing regression and technical-semantic scores.
+
+Note: v0.8 uses a 512-token context during pretraining, so token exposure per
+sample is twice that of the 256-token v0.7 setup. Therefore the experiment is
+best interpreted as a practical capacity-and-context scaling test rather than a
+perfect single-variable parameter-count ablation.
+
