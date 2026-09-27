@@ -3084,3 +3084,106 @@ CPU/GPU unseen full-name probes pass
 
 Generation remains untouched until this semantic-geometry gate is met.
 
+### v0.9 Semantic Encoder Adapter v0.4: Acronym Contrastive Alignment
+
+v0.3 showed that simply adding acronym/full-name rows was not sufficient:
+the unseen CPU/GPU full-name probes still mapped to the wrong concept cluster.
+
+v0.4 therefore adds an explicit acronym/alias contrastive alignment objective.
+The base v0.8 encoder remains frozen and training continues from v0.3.
+
+Alignment groups:
+
+```text
+CPU
+  CPU
+  Central Processing Unit
+  CPU <-> Central Processing Unit statement
+  CPU general/control definition
+
+GPU
+  GPU
+  Graphics Processing Unit
+  GPU <-> Graphics Processing Unit statement
+  GPU parallel-compute definition
+
+LLM
+  LLM
+  Large Language Model
+  LLM <-> Large Language Model statement
+  language-model definition
+
+CUDA
+  CUDA
+  NVIDIA GPU computing platform
+  NVIDIA GPU general-compute definition
+```
+
+For CUDA, v0.4 uses semantic aliases and definitions rather than depending on
+a formal acronym expansion.
+
+The alignment loss adapts all aliases and constructs a normalized center for
+each group. Each alias must classify to its own group center under a cosine
+similarity softmax:
+
+```text
+z(alias) -> adapter -> normalize
+group centers = mean(normalized aliases)
+logits = cosine(alias, centers) / temperature
+loss = cross entropy(group)
+```
+
+Loss weights:
+
+```text
+Concept CE             : 1.00
+Attribute BCE          : 0.75
+Centroid Margin Loss   : 0.20
+Pairwise Hard Negative : 0.50
+Acronym Alignment      : 1.00
+Preservation Loss      : 0.25
+
+alignment temperature  : 0.10
+learning rate          : 1e-4
+```
+
+Training continues from:
+
+```text
+model/model-gpu-v0.9-semantic-adapter-v03.pt
+```
+
+and writes:
+
+```text
+model/model-gpu-v0.9-semantic-adapter-v04.pt
+```
+
+Run:
+
+```powershell
+git checkout v0.9
+git pull
+
+python run_semantic_encoder_adapter_v04.py
+```
+
+Logs:
+
+```text
+results/semantic_encoder_adapter_v04/train.log
+results/semantic_encoder_adapter_v04/eval.log
+```
+
+The integration gate remains conservative:
+
+```text
+G05 adapted centroid -> CPU
+G08 adapted centroid -> Transformer
+G09 CUDA improves or does not regress
+technical held-out centroid accuracy does not regress
+unseen CPU/GPU/LLM/CUDA alias probes pass
+```
+
+Generation remains unchanged until the semantic geometry passes this gate.
+
