@@ -5961,3 +5961,65 @@ If G05 is close to CPU local rows but their CPU-GPU logit behavior differs:
   -> the representation is locally similar but the output map is non-smooth
      or directionally inconsistent.
 ```
+### v0.12.2 Local Logit Surface / Jacobian Diagnostic
+
+This is a diagnostic-only experiment. v0.12.2 remains the current-best checkpoint.
+
+Define the local CPU/GPU decision function in the frozen 345-d semantic + lexical
+condition space:
+
+```text
+D(z) = final_logit(CPU) - final_logit(GPU)
+```
+
+For each G05 variant, the prompt-specific base LM logits are held fixed and the
+diagnostic differentiates only through:
+
+```text
+gate(z) * direct_logit_adapter(z)
+```
+
+It computes:
+
+```text
+grad_z D(z)
+gradient norm
+directional derivative toward nearest CPU row
+directional derivative toward CPU centroid
+directional derivative toward nearest GPU row
+directional derivative toward GPU centroid
+```
+
+It also performs finite-step probes at 1%, 5%, 10%, 25%, 50%, and 100% of each
+direction vector, comparing the observed change in D(z) with the first-order
+Jacobian prediction.
+
+The failed v0.12.3 checkpoint is not loaded.
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_local_logit_surface_diagnostic_v0122.py
+```
+
+Log:
+
+```text
+results/local_logit_surface_v0122/diagnostic.log
+```
+
+Primary interpretation:
+
+```text
+CPU direction raises D and GPU direction lowers D
+  -> local output geometry is aligned; the remaining issue lies elsewhere.
+
+CPU direction does not raise D
+  -> semantic neighborhood and output-map gradient are locally inconsistent.
+
+Jacobian sign and finite-step behavior disagree
+  -> strong local nonlinearity / curvature in the output map.
+```
