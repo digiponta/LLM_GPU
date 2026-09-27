@@ -7025,3 +7025,115 @@ If benchmark fluency/strict scores regress:
   -> the top-competitor constraint is too aggressive and should be weakened
      before extending it further.
 ```
+### v0.10.0 Semantic-Gated Entity Decoder
+
+v0.9.9 showed that semantic/entity discrimination can be correct while the
+ordinary 8k-vocabulary first-token competition is still dominated by unrelated
+high-prior tokens. v0.10.0 therefore changes the decoding path rather than
+pushing vocabulary logits harder.
+
+Architecture:
+
+```text
+v0.9.9 adapted prompt hidden (256)       frozen
+                |
+                v
+      LayerNorm -> Linear 256 -> 64 -> GELU
+                |
+        +-------+--------+
+        |                |
+        v                v
+ answer-mode gate    entity decoder
+ entity / normal    CPU/GPU/LLM/
+                    Transformer/CUDA/Python
+        |
+        v
+if gate >= threshold:
+  force ONLY the selected entity's first token
+        |
+        v
+return immediately to ordinary frozen LM decoding
+```
+
+The v0.9.9 LM and semantic head are completely frozen. Only the new gate and
+entity decoder are trained. This isolates whether semantic state can route
+generation without further modifying the base generator.
+
+Training targets:
+
+```text
+gate = 1:
+  rows with exactly one technical entity tag whose gold answer starts with
+  that entity token
+
+gate = 0:
+  all other rows
+
+entity target:
+  one of CPU / GPU / LLM / Transformer / CUDA / Python
+```
+
+Exact fixed 30-case benchmark prompts remain excluded from training.
+
+New checkpoint:
+
+```text
+model/model-gpu-v0.10.0-semantic-gated-entity-decoder.pt
+```
+
+New files:
+
+```text
+semantic_gated_entity_decoder_v0100.py
+train_semantic_gated_entity_decoder_v0100.py
+evaluate_semantic_gated_entity_decoder_v0100.py
+run_semantic_gated_entity_decoder_v0100.py
+```
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_semantic_gated_entity_decoder_v0100.py
+```
+
+The evaluator reports for each focused probe:
+
+```text
+semantic probabilities
+entity-mode gate probability
+entity candidate probabilities
+forced entity tag (or None)
+final generated reply
+```
+
+Key diagnostic cases:
+
+```text
+Original G05
+G05 no-question
+Name-request G05
+CPU paraphrase
+GPU paraphrase
+Transformer
+Python
+Error
+```
+
+Interpretation:
+
+```text
+If G05-like prompts get gate≈1, entity=CPU, and the reply becomes CPU-like:
+  -> the main remaining bottleneck was ordinary vocabulary competition.
+
+If gate≈1 but the wrong entity is selected:
+  -> semantic/entity generalization remains the bottleneck.
+
+If the correct entity is selected but continuation is malformed:
+  -> first-token routing works, but post-entity LM continuation needs alignment.
+
+If non-entity prompts are incorrectly gated:
+  -> answer-mode classification needs a better decision boundary.
+```
