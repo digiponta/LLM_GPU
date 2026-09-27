@@ -5345,3 +5345,114 @@ Generation is intentionally untouched in this experiment. If the name-binding
 gate passes, the next controlled step is to inject this lexical CPU identity
 signal into generation/logit alignment.
 
+### v0.9.1 v0.11: Lexical Identity -> Generation Alignment
+
+v0.10.2 showed that the CPU lexical identity is strongly represented:
+
+```text
+CPU
+<-> Central Processing Unit
+<-> 中央処理装置
+<-> 中央演算処理装置
+```
+
+and the exact G05 holdout mapped toward the CPU name centroid.
+
+v0.11 tests whether this lexical identity signal improves generation when
+combined with the existing constrained semantic representation.
+
+Condition vector:
+
+```text
+adapted semantic hidden   : 256
+concept probabilities     :   6
+attribute probabilities   :   4
+constrained hierarchy     :  15
+CPU lexical identity      :  64
+                            ---
+total                     : 345
+```
+
+Generation path:
+
+```text
+345
+ -> Linear(345 -> 256), zero initialized
+ -> alpha = 0.1
+ -> inject after Block 3
+ -> Blocks 4-6
+ -> FinalNorm
+ -> frozen LM Head
+```
+
+Controlled training policy:
+
+```text
+v0.8 semantic path      : frozen
+v0.10.2 name binding    : frozen
+Blocks 1-3              : frozen
+Blocks 4-6              : trainable @ 1e-5
+FinalNorm               : trainable @ 1e-5
+LM Head                 : frozen
+345 -> 256 projection   : trainable @ 1e-3
+```
+
+This intentionally removes the LM-head adaptation variable tested in v0.10
+and v0.10.1. The only new information relative to the semantic-only additive
+integration is the frozen 64-d lexical identity.
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_lexical_generation_alignment_v011.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v0.9.1-lexical-generation-v011.pt
+```
+
+Logs:
+
+```text
+results/lexical_generation_v011/train.log
+results/lexical_generation_v011/eval.log
+```
+
+The evaluator prints CPU/GPU lexical-identity similarities for:
+
+```text
+G04 CPU
+G05 CPU hard case
+G06 CPU
+G08 Transformer
+G09 CUDA
+G27 GPU
+G28 CPU
+```
+
+Primary question:
+
+```text
+Does adding the successful CPU name identity signal
+change G05 generation from GPU-like wording to CPU?
+```
+
+Primary targets:
+
+```text
+G05 lexical identity -> CPU
+G05 generated answer -> CPU
+G04/G06 CPU retained
+G08 Transformer retained
+G09 CUDA retained
+G27 GPU retained
+G28 CPU retained
+semantic >= 26/30 if possible
+strict >= 26/30 if possible
+```
+
