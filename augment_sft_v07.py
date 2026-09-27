@@ -710,6 +710,122 @@ TARGETED_BOUNDARY_ROWS: Sequence[Tuple[str, str, str]] = [
 ]
 
 
+# v0.9 Targeted Boundary Training v2.
+# This second boundary set focuses only on the five residual development
+# failures after v1: CPU reverse lookup, Transformer category completion,
+# short/repeat separation, and end/topic separation.
+TARGETED_BOUNDARY_V2_ROWS: Sequence[Tuple[str, str, str]] = [
+    # CPU reverse-identification: emphasize "center/core + diverse commands"
+    # without copying the fixed benchmark wording.
+    (
+        "コンピュータ全体の中心で幅広い種類の命令を処理する演算装置を答えてください。",
+        "CPUです。CPUは多様な命令を実行し、汎用処理や制御を担当する演算装置です。",
+        "tech_cpu",
+    ),
+    (
+        "OSやアプリからのさまざまな命令を順に処理する中心的な演算装置は何ですか。",
+        "CPUです。CPUは幅広い命令を処理する汎用的な演算装置です。",
+        "tech_cpu",
+    ),
+    (
+        "多数の異なる命令を扱い、機器全体の制御にも使われる演算装置を一つ挙げてください。",
+        "CPUです。CPUは多様な命令実行と汎用制御を担当します。",
+        "tech_cpu",
+    ),
+    (
+        "並列計算専用ではなく、汎用的な命令処理の中心になる装置は何ですか。",
+        "CPUです。CPUは汎用処理や命令実行の中心となる演算装置です。",
+        "tech_cpu",
+    ),
+
+    # Transformer: force complete entity + mechanism + category answers.
+    (
+        "Attentionを主要機構として使う代表的なニューラルネットワーク構造を答えてください。",
+        "Transformerです。TransformerはAttentionを中心に情報を処理するニューラルネットワーク構造です。",
+        "tech_transformer",
+    ),
+    (
+        "Self-Attentionを中心に系列情報を扱うモデル構造の名称を答えてください。",
+        "Transformerです。TransformerはAttentionを中心に系列を処理するモデル構造です。",
+        "tech_transformer",
+    ),
+    (
+        "Attentionが中心的な仕組みである代表的なモデルアーキテクチャは何ですか。",
+        "Transformerです。TransformerはAttentionを使うニューラルネットワークのモデル構造です。",
+        "tech_transformer",
+    ),
+    (
+        "RNNとは異なりAttentionを中心に系列を扱うニューラルネットワーク方式は何ですか。",
+        "Transformerです。TransformerはAttentionを中心とするニューラルネットワーク構造です。",
+        "tech_transformer",
+    ),
+
+    # short <-> repeat: same topic, different requested operation.
+    (
+        "説明内容は変えず、返答の長さだけ短くしてください。",
+        "はい。同じ内容のまま要点だけ簡潔に答えます。",
+        "control_short",
+    ),
+    (
+        "詳しい説明は不要なので、結論だけ簡潔にしてください。",
+        "はい。結論だけ短く答えます。",
+        "control_short",
+    ),
+    (
+        "説明が理解できなかったので、内容を別の言葉で説明し直してください。",
+        "もちろんです。分かりやすい言葉に言い換えてもう一度説明します。",
+        "control_repeat",
+    ),
+    (
+        "短くする必要はありません。理解しやすい表現でもう一度説明してください。",
+        "はい。簡単な表現に言い換えてもう一度説明します。",
+        "control_repeat",
+    ),
+    (
+        "長さを減らすのではなく、分からなかった部分を言い換えて説明してください。",
+        "もちろんです。内容を言い換えて分かりやすく説明します。",
+        "control_repeat",
+    ),
+    (
+        "説明し直しではなく、返答をもっと短くしてください。",
+        "はい。説明し直さず、要点だけ短く答えます。",
+        "control_short",
+    ),
+
+    # end <-> topic: distinguish "stop and continue later" from "switch now".
+    (
+        "今日はここで区切り、残りは次の機会に続けましょう。",
+        "はい。また次回、続きから始めましょう。",
+        "control_end",
+    ),
+    (
+        "今はここまでにして、この続きは後日に回します。",
+        "お疲れさまでした。また後日、続きから始めましょう。",
+        "control_end",
+    ),
+    (
+        "会話をいったん終えて、残りは次の機会にしましょう。",
+        "はい。今回はここで終わりにして、また次回続けましょう。",
+        "control_end",
+    ),
+    (
+        "終了はせず、今すぐ別のテーマへ切り替えてください。",
+        "はい。会話は続けたまま、別の話題へ移りましょう。",
+        "control_topic",
+    ),
+    (
+        "次回へ持ち越すのではなく、今この場で別の話を始めましょう。",
+        "いいですよ。今すぐ別の話題に移りましょう。",
+        "control_topic",
+    ),
+    (
+        "今日は終わりにせず、現在の話題だけ変更したいです。",
+        "はい。会話は続けて、別のテーマに切り替えましょう。",
+        "control_topic",
+    ),
+]
+
+
 RELATION_AUGMENT_ROWS: Sequence[Tuple[str, str]] = [
     (
         "CPUとGPUの役割の違いを説明してください。",
@@ -758,6 +874,7 @@ def augment_pairs(
     base_pairs: Sequence[Pair],
     variants_per_intent: int = 24,
     include_targeted_boundary: bool = False,
+    include_targeted_boundary_v2: bool = False,
 ) -> List[LabeledPair]:
     """Return deduplicated base + deterministic synthetic multi-label rows."""
     output: List[LabeledPair] = []
@@ -787,6 +904,10 @@ def augment_pairs(
 
     if include_targeted_boundary:
         for prompt, answer, label in TARGETED_BOUNDARY_ROWS:
+            add(prompt, answer, label)
+
+    if include_targeted_boundary_v2:
+        for prompt, answer, label in TARGETED_BOUNDARY_V2_ROWS:
             add(prompt, answer, label)
 
     for prompt, answer in RELATION_AUGMENT_ROWS:
