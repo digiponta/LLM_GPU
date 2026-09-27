@@ -1592,3 +1592,98 @@ python train_sft_v08.py --replay-repeat 3
 
 `1` disables replay; `2` is the new default.
 
+### v0.8 pairwise hard-negative binding
+
+The v0.8 architecture, reverse-definition rows, replay balancing, and fixed
+30-case generalization benchmark are retained. This refinement adds pairwise
+hard-negative training for the remaining confused concepts.
+
+Target pairs:
+
+```text
+GPU <-> CPU
+Transformer <-> CUDA
+CUDA <-> Python
+```
+
+Twelve new training rows use matched question structures with opposite semantic
+properties. The model must choose the correct concept and explain the property
+that distinguishes it from the competing concept.
+
+Examples:
+
+```text
+CPUとGPUのうち、大量の同種計算を並列に処理する側は?
+-> GPU. Parallel computation.
+
+CPUとGPUのうち、多様な命令実行や汎用制御を主に担当する側は?
+-> CPU. General-purpose processing/control.
+
+TransformerとCUDAのうち、Attentionを中心に情報関係を処理する構造は?
+-> Transformer.
+
+TransformerとCUDAのうち、NVIDIA GPUを汎用計算に使う技術は?
+-> CUDA.
+
+CUDAとPythonのうち、GPU計算技術は?
+-> CUDA.
+
+CUDAとPythonのうち、汎用プログラミング言語は?
+-> Python.
+```
+
+The prompts are paired deliberately so that the surface form stays similar
+while the semantic property changes the correct answer. This is intended to
+strengthen entity-property binding rather than simply increase exposure to one
+technical term.
+
+The CUDA/GPU relation is also now tagged as `relation_compare`, making the
+multi-label auxiliary task more consistent with the other technical pairs.
+
+No exact prompt overlap was found between the new pairwise rows and the fixed
+30-case generalization benchmark.
+
+Training defaults remain:
+
+```text
+--technical-repeat 1
+--replay-repeat 2
+```
+
+and the architecture remains unchanged:
+
+```text
+d_model       : 256
+layers        : 6
+heads         : 8
+FFN           : 1024
+context       : 512
+tokenizer     : fixed v0.7 BPE
+```
+
+Pretraining does not need to be repeated:
+
+```powershell
+git checkout v0.8
+git pull
+
+python train_sft_v08.py
+python evaluate_chat.py
+python evaluate_generalization_v07.py
+```
+
+The baseline immediately before this refinement is:
+
+```text
+Semantic-content : 21/30 = 70.0%
+Strict composite : 21/30 = 70.0%
+Fluency          : 30/30 = 100.0%
+
+GPU             : 3/3
+CPU             : 2/3
+GPU/CPU         : 0/2
+Transformer     : 0/1
+CUDA            : 0/1
+Python          : 0/1
+```
+
