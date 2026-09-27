@@ -4993,3 +4993,108 @@ strict >= 26/30
 The evaluator prints all 15 constrained hierarchy marginals for G05, G08,
 G09 and G28.
 
+### v0.9.1 Semantic Consistency Training v0.9
+
+The v0.8 constrained semantic representation is correct, but additive
+conditioning alone still allows generation hidden states to drift toward the
+wrong semantic answer.
+
+v0.9 adds an explicit consistency objective.
+
+Teacher semantic target:
+
+```text
+concept probabilities     :  6
+attribute probabilities   :  4
+constrained hierarchy     : 15
+                           ---
+total                     : 25
+```
+
+The frozen v0.8 semantic path produces this 25-dimensional target.
+
+Generation-side consistency head:
+
+```text
+generation prompt hidden 256
+  -> LayerNorm
+  -> Linear(256 -> 25)
+  -> semantic prediction
+```
+
+Training objective:
+
+```text
+L_total
+=
+L_LM
++
+0.35 * L_semantic_consistency
+```
+
+where `L_semantic_consistency` is BCE between the generation-side semantic
+prediction and the frozen v0.8 semantic teacher target.
+
+Architecture:
+
+```text
+v0.8 semantic teacher
+  -> 281-d semantic condition
+  -> additive projection 281 -> 256
+  -> inject after Block 3
+  -> Blocks 4-6
+  -> FinalNorm
+       |-> LM Head
+       \-> Semantic Consistency Head 256 -> 25
+```
+
+Training policy:
+
+```text
+semantic teacher      : frozen
+Blocks 1-3            : frozen
+Blocks 4-6            : trainable
+FinalNorm             : trainable
+LM Head               : frozen
+281 -> 256 projection : trainable
+consistency head      : trainable
+```
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_semantic_consistency_v09.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v0.9.1-semantic-consistency-v09.pt
+```
+
+Logs:
+
+```text
+results/semantic_consistency_v09/train.log
+results/semantic_consistency_v09/eval.log
+```
+
+The evaluator reports both generation quality and semantic consistency for
+G05, G08, G09 and G28, including teacher vs generation-side concept
+probabilities.
+
+Primary targets:
+
+```text
+G05 generation -> CPU
+G05 generation hidden predicts CPU semantics
+G08 -> Transformer
+G09 -> CUDA
+G28 -> CPU
+semantic >= 26/30
+strict >= 26/30
+```
+
