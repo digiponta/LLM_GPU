@@ -6567,3 +6567,91 @@ If intent is correct but FiLM generation is still wrong:
 If G05 intent remains GPU/error-dominant while other technical generation improves:
   -> coupling is improved, but G05 still requires further intent-boundary work.
 ```
+### v0.9.5 Semantic Intent Bottleneck
+
+v0.9.4 showed that stronger FiLM coupling can improve generation, but ambiguous
+24-dimensional sigmoid intent probabilities remain a bottleneck. v0.9.5 adds
+a supervised continuous semantic representation before generation coupling.
+
+Architecture:
+
+```text
+prompt hidden (256)
+      |
+      v
+LayerNorm -> Linear 256 -> 64 -> GELU
+      |
+      +--> semantic bottleneck z (64)
+      |       |
+      |       +--> learned semantic/intent tag head 64 -> 24
+      |
+      + frozen v0.9.2 intent probabilities (24)
+      |
+      v
+concat: z64 + learned semantic24 + frozen intent24 = 112
+      |
+      v
+MLP 112 -> 128 -> 512
+      |
+      +--> FiLM gamma(256)
+      +--> FiLM beta(256)
+      |
+      v
+inject after Transformer Block 3
+```
+
+The v0.8 LM and v0.9.2 intent head are frozen. Only the semantic bottleneck,
+its 24-label supervision head, and the FiLM coupling are trainable.
+
+The auxiliary semantic head is supervised by the intent/tag labels already
+attached to the augmented SFT rows. This prevents the 64-dimensional bottleneck
+from becoming an unconstrained LM-only latent vector.
+
+New checkpoint:
+
+```text
+model/model-gpu-v0.9.5-semantic-intent-bottleneck.pt
+```
+
+New files:
+
+```text
+semantic_intent_bottleneck_v095.py
+train_semantic_intent_bottleneck_v095.py
+evaluate_semantic_intent_bottleneck_v095.py
+run_semantic_intent_bottleneck_v095.py
+```
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_semantic_intent_bottleneck_v095.py
+```
+
+The evaluator prints both the frozen v0.9.2 intent probabilities and the new
+learned semantic-tag probabilities for each focused probe. This allows direct
+inspection of whether the bottleneck separates CPU/GPU/Transformer/Python more
+cleanly than the original intent head.
+
+Log:
+
+```text
+results/semantic_intent_bottleneck_v095/run.log
+```
+
+Interpretation:
+
+```text
+If learned semantic tags correct G05/Transformer ambiguity and generation improves:
+  -> intent-representation ambiguity was a primary bottleneck.
+
+If learned semantic tags improve but generation does not:
+  -> semantic representation is better, but hidden-to-output coupling remains weak.
+
+If learned semantic tags remain ambiguous:
+  -> the frozen prompt hidden representation itself is insufficient and deeper
+     semantic encoder adaptation is required.
+```
