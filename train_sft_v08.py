@@ -58,10 +58,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--technical-repeat",
         type=int,
-        default=3,
+        default=1,
         help=(
             "Training-only repeat factor for rows carrying technical concept "
-            "tags. Validation rows are never oversampled."
+            "tags. Default 1 disables broad oversampling so v0.8 reverse-"
+            "definition binding can be evaluated independently."
         ),
     )
     return p.parse_args()
