@@ -90,6 +90,17 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--projection-lr", type=float, default=1e-3)
     p.add_argument("--block-lr", type=float, default=2e-6)
     p.add_argument(
+        "--unfreeze-lm-head",
+        action="store_true",
+        help="Train LM head with its own small learning rate.",
+    )
+    p.add_argument(
+        "--lm-head-lr",
+        type=float,
+        default=1e-6,
+        help="Learning rate for LM head when --unfreeze-lm-head is enabled.",
+    )
+    p.add_argument(
         "--targeted-boundary",
         action="store_true",
         help="Include v0.9 targeted boundary v1 rows in SFT augmentation.",
@@ -389,6 +400,7 @@ def main() -> None:
     configure_partial_finetune(
         generation_model,
         inject_after=args.inject_after,
+        unfreeze_lm_head=args.unfreeze_lm_head,
     )
 
     projection = MidLayerIntentProjection(
@@ -472,19 +484,33 @@ def main() -> None:
         pin_memory=(device.type == "cuda"),
     )
 
-    model_trainable = trainable_model_parameters(generation_model)
+    lm_head_params = list(generation_model.lm_head.parameters())
+    lm_head_ids = {id(p) for p in lm_head_params}
+    model_trainable = [
+        p for p in trainable_model_parameters(generation_model)
+        if id(p) not in lm_head_ids
+    ]
+
+    parameter_groups = [
+        {
+            "params": projection.parameters(),
+            "lr": args.projection_lr,
+        },
+        {
+            "params": model_trainable,
+            "lr": args.block_lr,
+        },
+    ]
+    if args.unfreeze_lm_head:
+        parameter_groups.append(
+            {
+                "params": lm_head_params,
+                "lr": args.lm_head_lr,
+            }
+        )
 
     optimizer = torch.optim.AdamW(
-        [
-            {
-                "params": projection.parameters(),
-                "lr": args.projection_lr,
-            },
-            {
-                "params": model_trainable,
-                "lr": args.block_lr,
-            },
-        ],
+        parameter_groups,
         weight_decay=0.01,
     )
 
@@ -505,7 +531,11 @@ def main() -> None:
         f"{args.inject_after + 1}-{generation_model.num_layers}",
     )
     print("FinalNorm trainable   : True")
-    print("LM Head trainable     : False")
+    print("LM Head trainable     :", args.unfreeze_lm_head)
+    print(
+        "LM Head LR            :",
+        args.lm_head_lr if args.unfreeze_lm_head else "frozen",
+    )
     print("Projection alpha      :", args.alpha)
     print("Projection LR         :", args.projection_lr)
     print("Block/FinalNorm LR    :", args.block_lr)
@@ -536,6 +566,8 @@ def main() -> None:
     bad_epochs = 0
 
     trainable_for_clip = list(projection.parameters()) + model_trainable
+    if args.unfreeze_lm_head:
+        trainable_for_clip += lm_head_params
 
     for epoch in range(1, args.epochs + 1):
         generation_model.train()
@@ -631,6 +663,10 @@ def main() -> None:
         intent_head=args.intent_head,
         block_learning_rate=args.block_lr,
         projection_learning_rate=args.projection_lr,
+        lm_head_learning_rate=(
+            args.lm_head_lr if args.unfreeze_lm_head else 0.0
+        ),
+        lm_head_trainable=args.unfreeze_lm_head,
     )
 
     print()
