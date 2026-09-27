@@ -2046,3 +2046,87 @@ The first success criterion is improvement on G14, G15, G18, and G28 without
 regressing the already stable GPU, error, comparison, CUDA/GPU, and
 LLM/Transformer cases.
 
+### v0.9 Partial Fine-Tuning block-LR sweep
+
+The partial fine-tuning experiment can now be swept automatically across:
+
+```text
+2e-6
+5e-6
+1e-5
+2e-5
+```
+
+while keeping:
+
+```text
+projection LR : 1e-3
+alpha         : 0.1
+inject-after  : Block 3
+LM Head       : frozen
+benchmark     : same fixed 30 cases
+```
+
+Run the complete sweep:
+
+```powershell
+git checkout v0.9
+git pull
+
+python run_partial_lr_sweep_v09.py
+```
+
+For each block learning rate the script:
+
+```text
+1. trains an independent partial-intent checkpoint
+2. evaluates it on the same 30-case benchmark
+3. saves training and evaluation logs
+4. records validation loss and evaluation metrics
+5. prints an overall and per-intent comparison
+```
+
+Independent checkpoints are written as:
+
+```text
+model/model-gpu-v0.9-partial-intent-blocklr-2e-6.pt
+model/model-gpu-v0.9-partial-intent-blocklr-5e-6.pt
+model/model-gpu-v0.9-partial-intent-blocklr-1e-5.pt
+model/model-gpu-v0.9-partial-intent-blocklr-2e-5.pt
+```
+
+Logs and CSV summary are written under:
+
+```text
+results/partial_lr_sweep_v09/
+```
+
+including:
+
+```text
+partial_lr_sweep_v09.csv
+```
+
+To print the full child-process output during the sweep:
+
+```powershell
+python run_partial_lr_sweep_v09.py --show-output
+```
+
+To re-evaluate existing sweep checkpoints without retraining:
+
+```powershell
+python run_partial_lr_sweep_v09.py --skip-training
+```
+
+The primary comparison remains the v0.8 pairwise-best baseline:
+
+```text
+Strict composite : 22/30 = 73.3%
+Semantic-content : 22/30 = 73.3%
+```
+
+The experiment tests whether the unchanged 22/30 ceiling is due to insufficient
+adaptation strength in Blocks 4-6, or whether the current intent representation
+and training data are the more likely bottleneck.
+
