@@ -4582,3 +4582,95 @@ technical held-out centroid accuracy does not regress
 Generation is not retrained in this step. The semantic ontology is validated
 first.
 
+### v0.9.1 Semantic Encoder Adapter v0.7.1: G05 Instruction-Computation Relation Refinement
+
+v0.7 introduced the explicit ontology:
+
+```text
+computation ⊂ instruction_execution
+```
+
+and passed 11/12 gates. The only remaining failure was the exact G05 relation:
+
+```text
+G05:
+instruction_execution < computation
+```
+
+even though G05 still mapped to CPU and retained a strong heterogeneous
+instruction-stream signal.
+
+v0.7.1 therefore performs a local relation refinement without changing the
+ontology.
+
+Important constraints:
+
+```text
+exact G05 prompt used for training : no
+base encoder                       : frozen
+semantic adapter                   : frozen
+concept / attribute heads          : frozen
+13-axis hierarchy head             : trainable
+generation                         : unchanged
+```
+
+The new paraphrases focus on G05-neighbor expressions such as:
+
+```text
+central/core processor
+diverse instructions
+broad instruction set
+varied instructions
+mixed instruction stream
+computation + control + memory + data movement
+```
+
+The direct relation objective is:
+
+```text
+P(instruction_execution)
+  >=
+P(computation) + 0.15
+```
+
+for these mixed-instruction neighborhood prompts.
+
+The existing 13-axis hierarchy is preserved with replay over the previous
+semantic supervision bank. The child-parent constraints are also retained.
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_semantic_encoder_adapter_v071.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v0.9.1-semantic-adapter-v071.pt
+```
+
+Logs:
+
+```text
+results/semantic_encoder_adapter_v071/train.log
+results/semantic_encoder_adapter_v071/eval.log
+```
+
+Primary gate:
+
+```text
+G05 instruction_execution > computation
+G05 centroid -> CPU
+G05 heterogeneous_instruction_stream remains strong
+G08 Transformer retained
+GPU repeated-computation behavior retained
+technical held-out centroid accuracy does not regress
+```
+
+Generation remains untouched until this final semantic relation gate is
+evaluated.
+
