@@ -6926,3 +6926,102 @@ If entity ordering improves but global top-1 remains an unrelated blocker,
 the next problem is full-vocabulary prior suppression rather than entity
 confusion. If CPU becomes global top-1 but the continuation still collapses,
 the remaining issue is post-first-token continuation rather than retrieval.
+### v0.9.9 Dynamic Top-Competitor Alignment
+
+v0.9.8 successfully improved semantic-state -> entity-logit coupling, but
+the correct entity token could still lose to an unrelated global vocabulary
+competitor such as `多数の`, `特集`, `ムスキー`, or malformed subword tokens.
+
+v0.9.9 directly optimizes that competition for entity-answer rows only.
+
+```text
+adapted semantic hidden
+        |
+        v
+correct entity first-token logit
+        |
+        +---- compare against max(all other vocabulary logits)
+        |
+        v
+margin loss:
+target_entity > dynamic_global_competitor + margin
+```
+
+The competitor is recomputed from the current full-vocabulary logits on every
+forward pass. The loss is applied only when the gold answer actually begins
+with a single technical entity (CPU/GPU/LLM/Transformer/CUDA/Python), so
+ordinary explanatory answers are not forced to start with an entity token.
+
+Default settings:
+
+```text
+source checkpoint       : model/model-gpu-v0.9.8-entity-logit-aligned.pt
+Blocks 4-6 LR           : 3e-7
+Semantic-head LR        : 3e-5
+LM-head LR              : 3e-6
+Dynamic top margin      : 0.75
+Dynamic top weight      : 0.15
+LM-head anchor weight   : 2e-4
+```
+
+v0.9.9 also guarantees that the validation split contains at least one
+eligible entity-answer row for each available technical entity when possible.
+The trainer prints train/validation eligible counts and validation top-loss,
+addressing the v0.9.8 diagnostic where entity/blocker validation losses could
+remain zero because no eligible validation samples were present.
+
+New checkpoint:
+
+```text
+model/model-gpu-v0.9.9-dynamic-top-competitor.pt
+```
+
+New files:
+
+```text
+dynamic_top_competitor_v099.py
+train_dynamic_top_competitor_v099.py
+evaluate_dynamic_top_competitor_v099.py
+run_dynamic_top_competitor_v099.py
+```
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_dynamic_top_competitor_v099.py
+```
+
+The evaluator prints the top five global vocabulary logits for each focused
+probe in addition to semantic and entity logits. The critical checks are:
+
+```text
+G05 no-question:
+  CPU entity should remain above GPU
+  and CPU should move toward / reach global top-1.
+
+CPU paraphrase:
+  CPU should remain far above GPU
+  while unrelated blockers such as the former `ムスキー` token are suppressed.
+
+Transformer:
+  Transformer should remain above CUDA among entity logits
+  while the malformed global blocker should lose rank.
+```
+
+Interpretation:
+
+```text
+If correct entity becomes global top-1 on held-out paraphrases:
+  -> the remaining bottleneck was global vocabulary competition.
+
+If training entity rows satisfy the margin but held-out probes do not:
+  -> the output-alignment rule does not generalize; stronger semantic/entity
+     conditioning or contrastive held-out training structure is needed.
+
+If benchmark fluency/strict scores regress:
+  -> the top-competitor constraint is too aggressive and should be weakened
+     before extending it further.
+```
