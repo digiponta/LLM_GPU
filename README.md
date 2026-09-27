@@ -6148,3 +6148,73 @@ CPU < competitor because bias_gap dominates
 CPU becomes rank 1 but generated reply still differs
   -> inspect token decoding / generation-step implementation.
 ```
+### v0.12.4 Conditional CPU-Semantic Top-Competitor Suppression
+
+This is a no-training safety sweep built on the current-best v0.12.2 checkpoint.
+
+The frozen semantic head provides the CPU condition:
+
+```text
+P(tech_cpu)
+```
+
+Only the first-token logits of the G05 blockers identified by the Top-K
+diagnostic are suppressed:
+
+```text
+多数の
+特集
+エ
+学習
+読み
+```
+
+The first-token formula is:
+
+```text
+final_logits
+=
+base_logits
++ entity_gate * v0.12.2_direct_bias
+- lambda * P(tech_cpu) * blocker_mask
+```
+
+Therefore suppression becomes strong only when the frozen semantic model
+classifies the prompt as CPU-like. Other concepts should receive little
+suppression because their P(tech_cpu) is lower.
+
+No weights are changed in this experiment. The sweep uses:
+
+```text
+lambda = 0, 2, 4, 6, 8, 10
+direct gain = 1.0
+```
+
+For every lambda the script reruns the fixed 30-case benchmark plus both G05
+variants and reports P(tech_cpu), CPU/GPU ranks, top-5 first-token logits,
+generated replies, and G08/G09/G10/G27/G28 regression status.
+
+Run:
+
+```powershell
+git checkout v0.9.1
+git pull
+
+python run_conditional_cpu_suppression_v0124.py
+```
+
+Log:
+
+```text
+results/conditional_cpu_suppression_v0124/sweep.log
+```
+
+Interpretation:
+
+```text
+If a moderate lambda makes G05 generate CPU while G08/G09/G10/G27/G28 remain stable:
+  -> conditional suppression is a viable next architecture.
+
+If non-CPU cases regress because P(tech_cpu) is not selective enough:
+  -> replace raw P(tech_cpu) with a learned or margin-based CPU-specific gate.
+```
