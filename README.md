@@ -8670,3 +8670,78 @@ G28 -> CPU
 G30 comparison remains protected
 ```
 
+### v0.11.10: Selective Intent Repair
+
+v0.11.9 showed that a free six-way calibrator can over-correct already-correct raw intents and can create false technical activations on nontechnical prompts.
+
+v0.11.10 changes the strategy from global recalibration to selective repair.
+
+Principles:
+
+```text
+1. Keep the raw technical top label by default.
+2. Allow label replacement only when the raw top-vs-second margin is small.
+3. Use the repair model to raise confidence for an already-correct raw winner.
+4. Train an explicit technical-scope gate with nontechnical negative prompts.
+5. Keep the frozen v0.11.8 generation binding unchanged.
+```
+
+The repair module contains:
+
+```text
+six raw technical logits
+        ├─ residual six-way repair
+        └─ binary technical-scope head
+```
+
+Default selective-repair conditions:
+
+```text
+raw top-second margin <= 0.20
+repaired top differs from raw top
+repaired top confidence >= 0.55
+```
+
+For LLM / Transformer / CUDA / Python binding:
+
+```text
+technical scope >= 0.70
+chosen concept confidence >= 0.70
+canonical name not already present in prompt
+```
+
+CPU/GPU continue to use the original pairwise intent and controller/executor role gates so G05/G27/G28 remain protected.
+
+New files:
+
+```text
+selective_intent_repair_v01110.py
+train_selective_intent_repair_v01110.py
+evaluate_selective_intent_repair_v01110.py
+run_selective_intent_repair_v01110.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v0.11.10
+git pull origin v0.11.10
+
+python run_selective_intent_repair_v01110.py
+```
+
+Primary checks:
+
+```text
+G05 -> CPU remains correct
+G07 -> raw LLM is preserved and confidence may be lifted
+G08 -> Transformer can be selectively repaired if ambiguity is small
+G09 -> CUDA remains correct
+G10 -> raw Python is preserved and confidence may be lifted
+G21 -> technical scope should block false Transformer activation
+G27 -> GPU
+G28 -> CPU
+G30 -> comparison remains protected
+```
+
