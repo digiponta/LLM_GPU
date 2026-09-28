@@ -9005,3 +9005,74 @@ G28 -> CPU
 G30 -> comparison protected / binding OFF
 ```
 
+### v0.11.15: Post-Entity Boundary Binding
+
+v0.11.14 confirmed that canonical entity completion itself was already correct. For G07, the tokenizer produced:
+
+```text
+LLM -> ['LL', 'M']
+```
+
+and the second token `M` was already the strongest token without any extra prefix boost. The remaining failure was the token immediately after the completed entity:
+
+```text
+LLM + ART -> LLMART
+```
+
+v0.11.15 adds a one-step boundary rule immediately after a bound canonical entity is completed.
+
+Boundary rule:
+
+```text
+for exactly one token after the entity:
+  block vocabulary tokens whose decoded piece begins directly with
+  ASCII alphanumeric or underscore
+
+then:
+  choose the highest remaining normal LM token
+
+after that one boundary step:
+  return to ordinary LM generation
+```
+
+This does not force a fixed suffix such as `です`. It only prevents direct ASCII continuation from merging with the canonical entity into a different identifier-like word.
+
+The rule applies only when semantic binding is active. Existing scope, repair, prefix, and safety gates remain unchanged.
+
+New files:
+
+```text
+evaluate_post_entity_boundary_binding_v01115.py
+run_post_entity_boundary_binding_v01115.py
+```
+
+No retraining is required.
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v0.11.15
+git pull origin v0.11.15
+
+python run_post_entity_boundary_binding_v01115.py
+```
+
+Primary target:
+
+```text
+G07: remove the "ART" continuation after LLM while preserving the exact LLM prefix.
+```
+
+Safety checks remain:
+
+```text
+G05 -> CPU
+G09 -> CUDA
+G10 -> Python
+G21 -> binding OFF
+G27 -> GPU
+G28 -> CPU
+G30 -> protected comparison / binding OFF
+```
+
