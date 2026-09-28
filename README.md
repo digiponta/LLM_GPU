@@ -10014,3 +10014,74 @@ results/hardware_threshold_safety_sweep_v1011/threshold_sweep.csv
 
 The expected safe region is around 0.93, because the observed false-positive GPU confidences were 0.899 and 0.915 while the useful held-out GPU overrides were 0.934 and 0.966. The sweep selects from measured results rather than assuming this threshold.
 
+### v1.0.12: CPU Hard-Case Recognition Repair
+
+v1.0.11 fixed the CPU/GPU hardware threshold at 0.93, preserving GPU 4/5 with zero observed hardware false positives. CPU remained at 2/5 because the remaining CPU failures were not threshold misses; their hardware labels were GPU or OTHER.
+
+v1.0.12 adds a separate CPU semantic detector trained on new CPU paraphrases and hard negatives.
+
+Architecture:
+
+```text
+Frozen base hidden state (256)
+        ↓
+MLP 256 -> 32 -> 1
+        ↓
+CPU probability
+```
+
+Runtime priority:
+
+```text
+1. Existing technical pipeline
+2. CUDA-only safe override
+3. LLM detector at 0.70
+4. Python detector
+5. CPU/GPU hardware detector at 0.93
+6. CPU hard-case detector
+7. Conversational fallback
+```
+
+The CPU detector only runs when the higher-priority CUDA / LLM / Python / hardware overrides are inactive.
+
+New files:
+
+```text
+train_cpu_semantic_detector_v1012.py
+evaluate_cpu_semantic_repair_v1012.py
+run_cpu_semantic_repair_v1012.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v.1.0.12
+git pull origin v.1.0.12
+
+python run_cpu_semantic_repair_v1012.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v1.0.12-cpu-detector.pt
+```
+
+Output:
+
+```text
+results/cpu_semantic_repair_v1012/evaluation.log
+```
+
+Primary acceptance target:
+
+```text
+Original integrated = 30/30
+CPU > 2/5
+GPU >= 4/5
+Python >= 3/5
+CUDA = 5/5
+CPU false positives = 0
+```
+
