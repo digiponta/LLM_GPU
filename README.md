@@ -9076,3 +9076,70 @@ G28 -> CPU
 G30 -> protected comparison / binding OFF
 ```
 
+### v0.11.16: Semantic Continuation Repair
+
+v0.11.15 completed the semantic-to-entity binding path and achieved 7/7 direct entity accuracy. The remaining technical failures were no longer entity-selection failures:
+
+```text
+G08 -> "Transformerです."       entity correct, Attention/content missing
+G27 -> "GPUは同種の計算を蛍ります." entity correct, parallel-compute content broken
+```
+
+v0.11.16 therefore repairs the continuation after the **actual generated entity**, not the internal chosen semantic label. This matters because G08 and G27 already generate the correct entity even when the internal selected concept differs.
+
+Semantic continuation anchors:
+
+```text
+GPU         -> は大量の並列計算を得意...
+CPU         -> は汎用処理や制御を担当...
+LLM         -> は文章を学習して生成する言語モデル...
+Transformer -> はAttentionを中心に使うモデル構造...
+CUDA        -> はNVIDIA GPUで汎用計算を行う技術...
+Python      -> は読みやすい汎用プログラミング言語...
+```
+
+The repair is deliberately narrow:
+
+```text
+1. Generate a v0.11.15 baseline.
+2. Detect whether the actual reply begins with a canonical technical entity.
+3. If the baseline already passes semantic-content evaluation, do nothing.
+4. If it is semantically incomplete, guide at most 8 continuation tokens.
+5. For each guided token, add only the minimum boost required to beat the
+   current hardest competitor by 0.35.
+6. Return to normal greedy LM generation immediately after the guided prefix.
+```
+
+This is an experimental semantic-readout repair, not retraining.
+
+New files:
+
+```text
+evaluate_semantic_continuation_repair_v01116.py
+run_semantic_continuation_repair_v01116.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v0.11.16
+git pull origin v0.11.16
+
+python run_semantic_continuation_repair_v01116.py
+```
+
+Primary targets:
+
+```text
+G08 -> Transformer + Attention/content
+G27 -> GPU + parallel-compute content
+```
+
+Safety target:
+
+```text
+G21/G30 must not activate continuation repair.
+Already-correct v0.11.15 technical replies should remain unchanged.
+```
+
