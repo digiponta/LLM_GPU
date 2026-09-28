@@ -11249,3 +11249,76 @@ Target:
     while retaining useful 6-class family-held-out performance
 
 Fresh-v2 is already a development set. Final validation still requires a future untouched Fresh-v3 set.
+### v1.3.1: GPU-CPU Family Cross-Generalization Matrix
+
+v1.3.0 showed that directly adapting Block1 for GPU-vs-CPU did not improve held-out family generalization. v1.3.1 therefore diagnoses whether the problem is a weak concept boundary or family-specific wording overlap.
+
+GPU families:
+
+    parallel
+    matrix
+    graphics
+    throughput
+    contrast_cpu
+
+CPU families:
+
+    control
+    instruction
+    general
+    sequential
+    contrast_gpu
+
+Representation:
+
+    frozen Block1 final-token hidden state
+
+Probe:
+
+    Linear 256 -> 2
+
+Three 5x5 matrices are produced:
+
+    A. within-pair 5-fold CV
+       Train/test inside one GPU-family + CPU-family pair.
+
+    B. leave-target-pair-out generalization
+       Train on the other four GPU families and four CPU families, then test the fully unseen target GPU-family + CPU-family pair.
+
+    C. source-pair-only -> all other families
+       Train only on one GPU-family + CPU-family pair, then test on all remaining GPU/CPU families.
+
+For every matrix, overall accuracy, GPU recall, and CPU recall are written separately.
+
+Additional output ranks target-family vulnerability using mean leave-pair-out accuracy.
+
+New files:
+
+    gpu_cpu_family_cross_generalization_v131.py
+    run_gpu_cpu_family_cross_generalization_v131.py
+
+Run:
+
+    git fetch origin
+    git checkout v1.3.1
+    git pull origin v1.3.1
+    python run_gpu_cpu_family_cross_generalization_v131.py
+
+Outputs:
+
+    results/gpu_cpu_family_cross_generalization_v131/matrix.log
+    results/gpu_cpu_family_cross_generalization_v131/within_pair_accuracy.csv
+    results/gpu_cpu_family_cross_generalization_v131/leave_pair_out_accuracy.csv
+    results/gpu_cpu_family_cross_generalization_v131/source_pair_to_others_accuracy.csv
+    results/gpu_cpu_family_cross_generalization_v131/*_gpu_recall.csv
+    results/gpu_cpu_family_cross_generalization_v131/*_cpu_recall.csv
+    results/gpu_cpu_family_cross_generalization_v131/family_pair_details.csv
+    results/gpu_cpu_family_cross_generalization_v131/target_family_vulnerability.csv
+
+Interpretation:
+
+    low within-pair -> the family definitions themselves overlap
+    high within-pair + low leave-pair-out -> wording/family overfitting
+    low source-pair-to-others -> that family pair is a poor teaching basis for the general GPU-vs-CPU boundary
+
+The purpose is diagnostic only; no routing policy or base-model weights are changed.
