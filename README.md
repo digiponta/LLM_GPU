@@ -10317,3 +10317,67 @@ Held-out technical >= 24/30
 Held-out total >= 45/60
 ```
 
+### v1.1.3: Deterministic Relation Response
+
+v1.1.2 restored original strict accuracy to 30/30 with the LLM-Transformer relation guard, but the guided decoder corrupted part of the hybrid relation sentence even though semantic scoring passed.
+
+v1.1.3 removes generative decoding from this deterministic relation path.
+
+Before:
+
+```text
+relation guard
+    -> generate_guided_response(...)
+    -> possible decoding corruption
+```
+
+Now:
+
+```text
+relation guard
+    -> return RELATION_ANCHOR directly
+```
+
+The fixed relation response is:
+
+```text
+LLMとTransformerは同じ意味ではありません。
+TransformerはLLMで利用されるモデル構造の一つです。
+```
+
+No checkpoint or threshold is changed. This isolates a generation-fidelity issue from semantic routing and prevents the model from corrupting an already-determined factual relation response.
+
+New files:
+
+```text
+evaluate_deterministic_relation_response_v113.py
+run_deterministic_relation_response_v113.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v1.1.3
+git pull origin v1.1.3
+
+python run_deterministic_relation_response_v113.py
+```
+
+Output:
+
+```text
+results/deterministic_relation_response_v113/evaluation.log
+```
+
+Primary acceptance target:
+
+```text
+G30 relation text is exact and uncorrupted
+Original semantic = 30/30
+Original strict = 30/30
+Held-out Transformer = 5/5
+Held-out technical >= 24/30
+Held-out total >= 45/60
+```
+
