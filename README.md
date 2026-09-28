@@ -9945,3 +9945,72 @@ CUDA = 5/5
 Hardware false positives = 0
 ```
 
+### v1.0.11: Hardware Threshold Safety Sweep
+
+v1.0.10 improved held-out GPU from 2/5 to 4/5, but the CPU/GPU detector produced two held-out false-positive GPU overrides on LLM prompts.
+
+v1.0.11 keeps the hardware detector frozen and sweeps only its runtime confidence threshold:
+
+```text
+0.75
+0.85
+0.90
+0.92
+0.93
+0.94
+0.95
+```
+
+Each threshold is evaluated on:
+
+```text
+Original integrated 30
+Held-out technical 30
+Held-out GPU 5
+Held-out CPU 5
+Held-out Python 5
+Held-out CUDA 5
+Held-out total 60
+Original hardware false positives
+Held-out hardware false positives
+```
+
+Selection priority:
+
+```text
+1. Original = 30/30
+2. Zero hardware false positives
+3. CUDA = 5/5
+4. Python >= 3/5
+5. Highest GPU accuracy
+6. Highest CPU accuracy
+7. Highest total accuracy
+8. Higher threshold for extra safety
+```
+
+New files:
+
+```text
+hardware_threshold_safety_sweep_v1011.py
+run_hardware_threshold_safety_sweep_v1011.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v.1.0.11
+git pull origin v.1.0.11
+
+python run_hardware_threshold_safety_sweep_v1011.py
+```
+
+Outputs:
+
+```text
+results/hardware_threshold_safety_sweep_v1011/threshold_sweep.log
+results/hardware_threshold_safety_sweep_v1011/threshold_sweep.csv
+```
+
+The expected safe region is around 0.93, because the observed false-positive GPU confidences were 0.899 and 0.915 while the useful held-out GPU overrides were 0.934 and 0.966. The sweep selects from measured results rather than assuming this threshold.
+
