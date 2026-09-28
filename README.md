@@ -10441,3 +10441,67 @@ Do not train or tune on these 120 prompts before recording the first result.
 
 The first run is the clean generalization measurement for the frozen v1.1.3 system.
 
+### v1.1.5: Unified Semantic Router Diagnostic
+
+Fresh Generalization Test v2 measured 65.0% total accuracy and 55.0% technical accuracy on 120 previously unused prompts. From this point, the Fresh v2 set is treated as a development set rather than a pristine test set.
+
+v1.1.5 does not change generation behavior. It collects all semantic detector outputs for the 60 technical Fresh v2 prompts and compares them simultaneously.
+
+Diagnostic candidate scores:
+
+```text
+GPU         = hardware GPU probability
+CPU         = max(hardware CPU probability, CPU hard-case probability)
+LLM         = max(primary LLM probability, second-stage LLM probability)
+Transformer = Transformer detector probability
+CUDA        = CUDA repair probability x repair scope
+Python      = Python detector probability
+```
+
+For every technical prompt the diagnostic records:
+
+```text
+gold class
+top-1 class / score
+top-2 class / score
+top-1 margin
+gold-class score
+all six candidate scores
+primary + second-stage LLM scores
+CPU binary score
+hardware CPU/GPU/OTHER probabilities
+CUDA repair probability
+repair scope
+```
+
+It also prints a six-class confusion matrix and per-class top-1 rates.
+
+Important: these detector heads were trained independently, so their raw outputs are not calibrated probabilities across classes. Raw argmax is therefore diagnostic only and is not deployed as a new routing policy.
+
+New files:
+
+```text
+unified_semantic_router_diagnostic_v115.py
+run_unified_semantic_router_diagnostic_v115.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v1.1.5
+git pull origin v1.1.5
+
+python run_unified_semantic_router_diagnostic_v115.py
+```
+
+Outputs:
+
+```text
+results/unified_semantic_router_diagnostic_v115/diagnostic.log
+results/unified_semantic_router_diagnostic_v115/router_scores.csv
+results/unified_semantic_router_diagnostic_v115/confusion.csv
+```
+
+The next decision should be based on whether score calibration can separate the correct concept from competing detector heads, or whether a single learned six-class semantic router should replace the serial override chain.
+
