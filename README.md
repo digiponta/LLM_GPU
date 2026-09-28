@@ -10381,3 +10381,63 @@ Held-out technical >= 24/30
 Held-out total >= 45/60
 ```
 
+### v1.1.4: Fresh Generalization Test v2
+
+v1.1.3 is frozen for this experiment. No detector retraining, no threshold tuning, and no new repair policy is introduced.
+
+A new evaluation-only set of 120 prompts is added:
+
+```text
+12 intents x 10 prompts
+
+GPU
+CPU
+LLM
+Transformer
+CUDA
+Python
+short
+topic
+repeat
+compare
+error
+end
+```
+
+The purpose is to measure whether the v1.1.3 improvements generalize to previously unused prompts instead of continuing to tune against the original 60 held-out cases.
+
+New files:
+
+```text
+fresh_generalization_cases_v114.py
+evaluate_fresh_generalization_v114.py
+run_fresh_generalization_v114.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v1.1.4
+git pull origin v1.1.4
+
+python run_fresh_generalization_v114.py
+```
+
+Outputs:
+
+```text
+results/fresh_generalization_v114/fresh_v2.log
+results/fresh_generalization_v114/fresh_v2.csv
+```
+
+The CSV records each fresh prompt, final response, pass/fail result, missing semantic requirements, conversational route, and which semantic overrides fired.
+
+Important evaluation rule:
+
+```text
+Do not train or tune on these 120 prompts before recording the first result.
+```
+
+The first run is the clean generalization measurement for the frozen v1.1.3 system.
+
