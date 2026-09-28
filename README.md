@@ -9285,3 +9285,64 @@ G05/G07/G08/G09/G10/G27/G28 technical behavior unchanged.
 G30 protected LLM-vs-Transformer comparison must not enter conversational repair.
 ```
 
+### v1.0.1: Held-out Generalization Test
+
+v.1.0.0 freezes the 30-case benchmark-complete pipeline.
+
+v.1.0.1 adds a completely new 60-case held-out paraphrase evaluation without modifying the model or repair logic.
+
+Coverage:
+
+```text
+12 intents x 5 paraphrases = 60 cases
+
+gpu / cpu / llm / transformer / cuda / python
+short / topic / repeat / compare
+error / end
+```
+
+The new prompts are different from the original 30-case benchmark.
+
+Metrics:
+
+```text
+Baseline semantic accuracy
+Final semantic accuracy
+Per-intent accuracy
+Conversational repair precision
+Conversational repair recall
+False activation rate
+```
+
+The evaluator runs both:
+
+```text
+v0.11.17 baseline
+v0.11.18 final conversational-repair pipeline
+```
+
+so the contribution and safety of conversational repair can be measured directly.
+
+New files:
+
+```text
+evaluate_heldout_generalization_v1001.py
+run_heldout_generalization_v1001.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v.1.0.1
+git pull origin v.1.0.1
+
+python run_heldout_generalization_v1001.py
+```
+
+Output:
+
+```text
+results/heldout_generalization_v1001/evaluation.log
+```
+
