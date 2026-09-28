@@ -11636,3 +11636,72 @@ Outputs:
     results/aligned_semantic_dataset_v2_v136/leave_axis_breakdown.csv
 
 This experiment changes the semantic ontology and evaluation dataset only; the base model and routing policy are unchanged.
+### v1.3.7: Six-Class Symmetric Comparison Dataset
+
+v1.3.6 raised six-class mixed-axis accuracy to 82.3% and leave-one-axis-out accuracy to 75.0%, but the comparison axis remained the weakest at 55.0%. v1.3.7 redesigns comparison for all six classes using symmetric reciprocal contrast pairs.
+
+Classes:
+
+    GPU
+    CPU
+    LLM
+    Transformer
+    CUDA
+    Python
+
+Comparison construction:
+
+    complete graph across all 6 classes
+    15 unordered class pairs
+    2 semantic topics per pair
+    reciprocal prompt for each class in the pair
+    30 reciprocal topics
+    60 comparison prompts
+    exactly 10 comparison prompts per class
+
+Each reciprocal pair uses the same sentence form:
+
+    target semantic description
+    contrasted semantic description
+    only the intended class direction is reversed
+
+The remaining four axes (definition, architecture, function, application) are reused unchanged from v1.3.6.
+
+Evaluations:
+
+    1. v1.3.6 old comparison within-axis CV
+    2. v1.3.7 symmetric comparison within-axis CV
+    3. non-comparison axes -> old comparison transfer
+    4. non-comparison axes -> symmetric comparison transfer
+    5. full v1.3.7 mixed-axis stratified 5-fold CV
+    6. full v1.3.7 leave-one-axis-out
+
+All evaluations use the same completely frozen base model and the Block1 final-token hidden representation with a Linear 256 -> 6 probe.
+
+References:
+
+    v1.3.6 mixed-axis           : 82.3%
+    v1.3.6 leave-one-axis-out   : 75.0%
+    v1.3.6 comparison axis      : 55.0%
+
+New files:
+
+    semantic_symmetric_comparison_v137.py
+    semantic_aligned_v3_v137.py
+    symmetric_comparison_eval_v137.py
+    run_symmetric_comparison_eval_v137.py
+
+Run:
+
+    git fetch origin
+    git checkout v1.3.7
+    git pull origin v1.3.7
+    python run_symmetric_comparison_eval_v137.py
+
+Outputs:
+
+    results/symmetric_comparison_v137/evaluation.log
+    results/symmetric_comparison_v137/summary.csv
+    results/symmetric_comparison_v137/comparison_per_class.csv
+
+The experiment changes only semantic comparison-data design. Base-model weights and routing policy remain unchanged.
