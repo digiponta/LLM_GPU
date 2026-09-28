@@ -10505,3 +10505,79 @@ results/unified_semantic_router_diagnostic_v115/confusion.csv
 
 The next decision should be based on whether score calibration can separate the correct concept from competing detector heads, or whether a single learned six-class semantic router should replace the serial override chain.
 
+### v1.2.0: Unified Hidden-State Semantic Router
+
+v1.1.5 showed that raw detector-score argmax reaches only 51.7% on the Fresh-v2 technical development set, while score calibration improves to about 60%. This suggests that detector outputs contain useful information but are not sufficiently comparable across independently trained heads.
+
+v1.2.0 tests a cleaner architecture:
+
+```text
+Prompt
+  ↓
+Frozen base LLM
+  ↓
+last hidden state (256)
+  ↓
+Unified 6-class semantic router
+  ↓
+GPU / CPU / LLM / Transformer / CUDA / Python
+```
+
+No serial detector priority is used in this experiment.
+
+Two router architectures are evaluated:
+
+```text
+Linear : 256 -> 6
+
+MLP:
+256 -> 64 -> GELU -> Dropout(0.10) -> 6
+```
+
+Evaluation uses the Fresh-v2 technical 60 prompts as a development set with 5-fold stratified cross-validation. Each fold contains two examples per class. Three random seeds are ensembled inside each fold.
+
+Important:
+
+```text
+Fresh-v2 is no longer treated as a pristine final test set.
+The v1.2.0 result is cross-validated development performance.
+A new untouched Fresh-v3 set will be required before claiming final generalization.
+```
+
+New files:
+
+```text
+unified_hidden_router_cv_v120.py
+run_unified_hidden_router_cv_v120.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v1.2.0
+git pull origin v1.2.0
+
+python run_unified_hidden_router_cv_v120.py
+```
+
+Outputs:
+
+```text
+results/unified_hidden_router_cv_v120/cv.log
+results/unified_hidden_router_cv_v120/summary.csv
+results/unified_hidden_router_cv_v120/linear_oof_predictions.csv
+results/unified_hidden_router_cv_v120/linear_confusion.csv
+results/unified_hidden_router_cv_v120/mlp_oof_predictions.csv
+results/unified_hidden_router_cv_v120/mlp_confusion.csv
+```
+
+Reference points:
+
+```text
+Raw detector-score argmax : 51.7%
+Calibrated score router   : about 60%
+```
+
+If hidden-state cross-validation is clearly above the calibration reference, v1.2.x should continue with the unified hidden-state router architecture rather than adding more serial concept-specific detectors.
+
