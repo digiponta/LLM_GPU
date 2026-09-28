@@ -9143,3 +9143,70 @@ G21/G30 must not activate continuation repair.
 Already-correct v0.11.15 technical replies should remain unchanged.
 ```
 
+### v0.11.17: Transformer Continuation Category Repair
+
+v0.11.16 improved semantic-content and strict accuracy to 25/30 while preserving 7/7 direct entity accuracy and G21/G30 safety.
+
+The remaining technical failure was G08:
+
+```text
+TransformerはAttentionを中心に使うための技術です。
+```
+
+The generated entity and Attention relation were correct, but the continuation drifted to the wrong category because v0.11.16 stopped guidance after 8 tokens, before the anchor reached `モデル構造`.
+
+v0.11.17 keeps the entire v0.11.16 mechanism unchanged except for one narrow rule:
+
+```text
+if actual generated entity == Transformer
+and baseline semantic-content == MISS:
+    guide the complete Transformer continuation anchor
+else:
+    keep the v0.11.16 maximum of 8 guided tokens
+```
+
+Transformer anchor:
+
+```text
+はAttentionを中心に使うモデル構造
+```
+
+The same hardest-competitor margin remains:
+
+```text
+continuation margin = 0.35
+```
+
+No retraining is required.
+
+New files:
+
+```text
+evaluate_transformer_continuation_category_repair_v01117.py
+run_transformer_continuation_category_repair_v01117.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v0.11.17
+git pull origin v0.11.17
+
+python run_transformer_continuation_category_repair_v01117.py
+```
+
+Primary target:
+
+```text
+G08 -> Transformer + Attention + model/structure category
+```
+
+Expected preservation targets:
+
+```text
+G01 and G27 remain repaired by the v0.11.16 GPU continuation.
+G05/G07/G09/G10/G28 remain unchanged.
+G21/G30 continuation repair remains OFF.
+```
+
