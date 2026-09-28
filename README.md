@@ -8237,3 +8237,64 @@ G27 remains GPU
 G28 remains CPU
 ```
 
+### v0.11.4: Direct CPU/GPU Margin Strength Sweep
+
+v0.11.3 proved that the direct signed gap correction works in the correct direction. For G05:
+
+```text
+base CPU-GPU gap = -3.099
+learned delta     = +2.694
+final gap         = -0.405
+```
+
+The remaining issue is correction strength, not semantic direction.
+
+v0.11.4 keeps the v0.11.3 architecture unchanged and sweeps only:
+
+```text
+max_delta
+learning rate
+target signed margin
+```
+
+Sweep configurations:
+
+```text
+d16_lr2e3_m15 : max_delta=16, lr=2e-3, margin=1.5
+d20_lr2e3_m15 : max_delta=20, lr=2e-3, margin=1.5
+d20_lr3e3_m20 : max_delta=20, lr=3e-3, margin=2.0
+d24_lr3e3_m20 : max_delta=24, lr=3e-3, margin=2.0
+```
+
+The training script now accepts:
+
+```text
+--target-margin
+```
+
+Selection criterion:
+
+```text
+G05 -> CPU
+G27 -> GPU
+G28 -> CPU
+```
+
+If multiple configurations pass, the sweep recommends the checkpoint with the smallest G05 margin overshoot above +1.0.
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v0.11.4
+git pull origin v0.11.4
+
+python run_cpu_gpu_direct_margin_sweep_v0114.py
+```
+
+Logs are written under:
+
+```text
+results/cpu_gpu_direct_margin_sweep_v0114/
+```
+
