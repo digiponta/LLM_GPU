@@ -11036,3 +11036,78 @@ Primary decision:
     fusion <= 60.7% -> Block1 remains the preferred routing tap point
 
 GPU recall is tracked separately because v1.2.6 showed weak GPU separability at every individual layer.
+### v1.2.8: Class-Specific Layer Gating
+
+v1.2.7 showed that simple multi-layer concatenation does not beat Block1 Linear (60.7%), but GPU recognition is stronger at Block4 with an MLP specialist. v1.2.8 therefore uses class-dependent routing instead of global fusion.
+
+Architecture:
+
+    Block1 -> Linear 6-class general router
+    Block4 -> MLP GPU-vs-NonGPU specialist
+
+Policy:
+
+    use Block1 general prediction by default
+    if Block4 GPU specialist confidence >= threshold and general prediction is not GPU
+    override prediction to GPU
+
+GPU specialist:
+
+    input 256
+    hidden 64
+    output 2
+    positive-class weight 5.0
+
+Threshold sweep:
+
+    0.50
+    0.60
+    0.70
+    0.80
+    0.85
+    0.90
+    0.95
+
+Evaluation:
+
+    300 prompts
+    6 classes
+    5-fold family-held-out CV
+    3 seeds/fold
+
+Reported diagnostics:
+
+    overall accuracy
+    macro recall
+    per-class recall
+    override count
+    helpful overrides
+    harmful overrides
+    correct GPU overrides
+    false GPU overrides
+    override precision
+
+New files:
+
+    class_specific_layer_gating_v128.py
+    run_class_specific_layer_gating_v128.py
+
+Run:
+
+    git fetch origin
+    git checkout v1.2.8
+    git pull origin v1.2.8
+    python run_class_specific_layer_gating_v128.py
+
+Outputs:
+
+    results/class_specific_layer_gating_v128/gating.log
+    results/class_specific_layer_gating_v128/threshold_sweep.csv
+    results/class_specific_layer_gating_v128/oof_scores.csv
+    results/class_specific_layer_gating_v128/threshold_*_confusion.csv
+
+Reference:
+
+    v1.2.7 Block1 Linear : 60.7%
+
+Important: threshold selection is development tuning on the same 300-prompt dataset. A future untouched Fresh-v3 set is required for unbiased final validation.
