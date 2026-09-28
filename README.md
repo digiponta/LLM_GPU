@@ -8874,3 +8874,55 @@ G28 -> CPU
 G30 -> binding OFF / comparison protected
 ```
 
+### v0.11.13: LLM Hardest-Competitor Boost Sweep
+
+v0.11.12 successfully activated LLM rescue for G07, but the learned v0.11.8 boost (+4.963) was still not large enough to move the first token from the base winner to the LLM token.
+
+v0.11.13 freezes all intent, scope, repair, and binding logic and sweeps only an extra multiplier on the LLM-rescue boost:
+
+```text
+1.00 / 1.25 / 1.50 / 2.00 / 2.50 / 3.00
+```
+
+The multiplier is applied only when the narrow v0.11.12 LLM rescue condition is true. All other concepts keep their original v0.11.8 boost unchanged.
+
+Fixed thresholds:
+
+```text
+repair margin       = 0.20
+scope threshold     = 0.50
+binding confidence  = 0.45
+LLM rescue margin   = 0.20
+LLM rescue confidence = 0.70
+```
+
+Mandatory guards:
+
+```text
+G05 -> CPU
+G09 -> CUDA
+G10 -> Python
+G21 -> binding OFF
+G27 -> GPU
+G28 -> CPU
+G30 -> binding OFF
+```
+
+The sweep selects the smallest multiplier that makes G07 start with LLM while all guards still pass.
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v0.11.13
+git pull origin v0.11.13
+
+python run_llm_hardest_competitor_boost_sweep_v01113.py
+```
+
+Output:
+
+```text
+results/llm_hardest_competitor_boost_sweep_v01113/boost_sweep.csv
+```
+
