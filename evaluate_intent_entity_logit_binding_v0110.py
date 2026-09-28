@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 from evaluate_generalization_v07 import CASES, dimension_match
 from intent_conditioning_v09 import load_intent_head
-from intent_entity_logit_binding_v0110 import load_binding_checkpoint, technical_confidence
+from intent_entity_logit_binding_v0110 import load_binding_checkpoint, technical_gate
 from model import LanguageModel
 from tokenizer_bpe import Tokenizer
 
@@ -31,12 +31,14 @@ def generate(model,tok,head,labels,adapter,threshold,prompt_text,max_new_tokens=
         if step==0:
             pr=hidden[:,-1,:]
             ip=torch.sigmoid(head(pr))
-            conf=float(technical_confidence(ip,labels)[0].item())
-            active=conf>=threshold
+            conf_t, active_t, count_t = technical_gate(ip, labels, threshold)
+            conf=float(conf_t[0].item())
+            active=bool(active_t[0].item())
+            active_count=int(count_t[0].item())
             if active: logits=logits+adapter(ip)[0]
             topi=torch.topk(ip[0],min(5,len(labels)))
             ranked=[(labels[int(i)],float(v)) for v,i in zip(topi.values.tolist(),topi.indices.tolist())]
-            first_info=(conf,active,ranked)
+            first_info=(conf,active,active_count,ranked)
         if response:
             for tid in set(response):
                 if logits[tid]>=0: logits[tid]/=1.05
@@ -69,8 +71,8 @@ def main():
         print(f"[G{idx:02d}] {str(c['intent']):14s} 人: {c['prompt']}"); print("      AI:",reply)
         print("      semantic-content="+("PASS" if dims["semantic_ok"] else "MISS")+" | entity="+("N/A" if dims["entity_ok"] is None else ("PASS" if dims["entity_ok"] else "MISS"))+" | fluency="+("PASS" if dims["fluent_ok"] else "MISS")+" | strict="+("PASS" if dims["strict_ok"] else "MISS"))
         if info:
-            conf,active,ranked=info
-            print(f"      binding-gate={'ON' if active else 'OFF'} conf={conf:.3f} top="+", ".join(f"{n}={v:.3f}" for n,v in ranked))
+            conf,active,active_count,ranked=info
+            print(f"      binding-gate={'ON' if active else 'OFF'} conf={conf:.3f} active-tech={active_count} top="+", ".join(f"{n}={v:.3f}" for n,v in ranked))
         if idx in DIRECT:
             ok=reply.startswith(DIRECT[idx]); direct+=int(ok); print("      direct-entity="+("PASS" if ok else "MISS")+" | expected="+DIRECT[idx])
     print(); print("Summary"); print("-------"); print(f"Semantic-content rate : {sem}/30 ({sem/30:.1%})"); print(f"Fluency rate          : {flu}/30 ({flu/30:.1%})"); print(f"Strict composite rate : {strict}/30 ({strict/30:.1%})"); print(f"Direct-entity rate    : {direct}/6 ({direct/6:.1%})")
