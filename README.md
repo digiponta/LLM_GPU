@@ -7977,3 +7977,67 @@ python run_intent_entity_logit_binding_v0110.py
 
 Primary criterion: G05 should start with `CPU` while nontechnical cases remain unchanged. Direct-entity cases G08/G09/G10/G27/G28 are secondary regression guards.
 \n
+
+### v0.11.1: CPU-GPU Relational Binding
+
+v0.11.0 showed that the clean intent head can prefer CPU for G05 while generation still starts with GPU. v0.11.1 adds directional CPU-GPU relations instead of treating CPU and GPU only as independent attribute bundles.
+
+Directional relation labels:
+
+```text
+cpu_controls_gpu
+gpu_controlled_by_cpu
+cpu_assigns_work_gpu
+gpu_executes_for_cpu
+```
+
+Examples of new relation supervision:
+
+```text
+CPU -> controls / assigns work -> GPU
+GPU -> is controlled by / executes work for -> CPU
+```
+
+The model learns these relations from paraphrased training rows. The exact fixed G05 benchmark prompt remains excluded.
+
+Architecture:
+
+```text
+clean v0.8 hidden
+   -> frozen clean intent head (24 dims)
+   -> trainable directional relation head (4 dims)
+   -> [intent probabilities + relation probabilities]
+   -> low-rank vocabulary-logit binding
+   -> first-token CPU/GPU correction
+```
+
+The clean v0.8 backbone and clean intent head remain frozen. Only the relation head and relational binding adapter are trainable.
+
+New/updated files:
+
+```text
+augment_sft_v07.py
+cpu_gpu_relational_binding_v0111.py
+train_cpu_gpu_relational_binding_v0111.py
+evaluate_cpu_gpu_relational_binding_v0111.py
+run_cpu_gpu_relational_binding_v0111.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v0.11.1
+git pull origin v0.11.1
+
+python run_cpu_gpu_relational_binding_v0111.py
+```
+
+Primary success criterion:
+
+```text
+G05 should start with CPU, while G27 and G28 remain correct.
+```
+
+The evaluator also prints the four learned relation probabilities for every fixed benchmark case so the effect can be inspected directly.
+
