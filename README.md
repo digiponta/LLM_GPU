@@ -11516,3 +11516,66 @@ Outputs:
     results/semantic_dataset_redesign_v134/redesigned_leave_axis_out.csv
 
 This experiment intentionally changes only the semantic ontology/evaluation dataset, not the base model or routing policy.
+### v1.3.5: Comparison-Axis Redesign / Hard Contrast Diagnostic
+
+v1.3.4 showed that ontology alignment improved GPU/CPU leave-one-axis-out generalization to 62.0%, but the comparison axis remained a clear outlier (30% within-axis, 35% leave-axis-out).
+
+v1.3.5 redesigns only the comparison axis using matched hard-contrast pairs.
+
+Design rule:
+
+    same topic family
+    nearly identical question syntax
+    opposite computational criterion
+    expected answer flips only between GPU and CPU
+
+Examples of paired criteria:
+
+    high-throughput homogeneous parallel arithmetic vs low-latency branch-heavy control
+    large matrix multiplication vs OS/interrupt control
+    many lightweight arithmetic units vs fewer high-function cores
+    data-parallel workload vs branch/control-dependent workload
+
+Dataset:
+
+    10 matched GPU/CPU pairs
+    20 prompts total
+
+Base model weights remain completely frozen. Evaluation uses the Block1 final-token hidden state with a Linear 256 -> 2 probe.
+
+Evaluations:
+
+    1. old v1.3.4 comparison-axis within-axis 5-fold CV
+    2. hard matched-pair leave-one-pair-out CV
+    3. train on aligned non-comparison axes, transfer to old comparison
+    4. train on aligned non-comparison axes, transfer to hard comparison
+
+Interpretation:
+
+    hard-pair >> old-comparison
+        -> old comparison wording/ontology caused much of the failure
+
+    hard-pair good but non-comparison transfer low
+        -> comparison relation remains a separate representation problem
+
+    both hard-pair and transfer low
+        -> frozen Block1 is weak at relational GPU/CPU comparison
+
+New files:
+
+    semantic_gpu_cpu_comparison_hard_v135.py
+    comparison_axis_redesign_diagnostic_v135.py
+    run_comparison_axis_redesign_diagnostic_v135.py
+
+Run:
+
+    git fetch origin
+    git checkout v1.3.5
+    git pull origin v1.3.5
+    python run_comparison_axis_redesign_diagnostic_v135.py
+
+Outputs:
+
+    results/comparison_axis_redesign_v135/diagnostic.log
+    results/comparison_axis_redesign_v135/summary.csv
+    results/comparison_axis_redesign_v135/hard_pair_results.csv
