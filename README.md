@@ -11579,3 +11579,60 @@ Outputs:
     results/comparison_axis_redesign_v135/diagnostic.log
     results/comparison_axis_redesign_v135/summary.csv
     results/comparison_axis_redesign_v135/hard_pair_results.csv
+### v1.3.6: Aligned Semantic Dataset v2
+
+v1.3.5 showed that symmetric comparison wording substantially improved GPU/CPU comparison behavior. v1.3.6 generalizes that lesson to all six semantic classes.
+
+Classes:
+
+    GPU
+    CPU
+    LLM
+    Transformer
+    CUDA
+    Python
+
+Shared ontology axes:
+
+    definition
+    architecture
+    function
+    comparison
+    application
+
+Every class contains 10 prompts per axis:
+
+    6 classes x 5 axes x 10 prompts = 300 prompts
+
+The base model remains completely frozen. Evaluation uses the Block1 final-token hidden representation with a Linear 256 -> 6 probe.
+
+Evaluations:
+
+    1. Mixed-axis stratified 5-fold CV
+       Every fold receives examples from every class and every semantic axis.
+
+    2. Leave-one-axis-out
+       One complete semantic axis is held out across all six classes.
+
+The second evaluation is the main cross-axis generalization test because the ontology is now aligned across all classes.
+
+New files:
+
+    semantic_aligned_v2_v136.py
+    aligned_semantic_dataset_v2_eval_v136.py
+    run_aligned_semantic_dataset_v2_eval_v136.py
+
+Run:
+
+    git fetch origin
+    git checkout v1.3.6
+    git pull origin v1.3.6
+    python run_aligned_semantic_dataset_v2_eval_v136.py
+
+Outputs:
+
+    results/aligned_semantic_dataset_v2_v136/evaluation.log
+    results/aligned_semantic_dataset_v2_v136/summary.csv
+    results/aligned_semantic_dataset_v2_v136/leave_axis_breakdown.csv
+
+This experiment changes the semantic ontology and evaluation dataset only; the base model and routing policy are unchanged.
