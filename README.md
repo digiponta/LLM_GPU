@@ -10667,3 +10667,74 @@ v1.2.0 hidden-state CV: 63.3%
 
 The main question for v1.2.1 is whether broader semantic training data improves GPU/CPU recognition without sacrificing the strong CUDA, Python, and Transformer separation already observed.
 
+### v1.2.2: Semantic Family Invariance Training
+
+v1.2.1 showed a strong development-transfer gain on Fresh-v2 (Linear 81.7%) but only 53.0% family-held-out CV. This indicates that the router can learn seen semantic families but still struggles to generalize across unseen families within the same concept.
+
+v1.2.2 adds an explicit invariance objective:
+
+```text
+Frozen base hidden state (256)
+        ↓
+Semantic projection 256 -> 64
+        ↓
+6-class router
+```
+
+Training loss:
+
+```text
+L = CrossEntropy + lambda * SupervisedContrastiveLoss
+```
+
+The supervised contrastive term pulls examples from the same semantic class together across different families and pushes examples from different classes apart.
+
+Lambda sweep:
+
+```text
+0.00
+0.10
+0.25
+0.50
+1.00
+```
+
+Evaluation remains 5-fold family-held-out CV on the 300-prompt v1.2.1 dataset. Each fold holds out one complete semantic family from every class.
+
+A full-data Fresh-v2 transfer check is also retained to ensure that stronger invariance does not destroy the previously observed transfer performance.
+
+New files:
+
+```text
+semantic_family_invariance_cv_v122.py
+run_semantic_family_invariance_v122.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v1.2.2
+git pull origin v1.2.2
+
+python run_semantic_family_invariance_v122.py
+```
+
+Outputs:
+
+```text
+results/semantic_family_invariance_v122/invariance.log
+results/semantic_family_invariance_v122/summary.csv
+results/semantic_family_invariance_v122/lambda_*_cv_confusion.csv
+results/semantic_family_invariance_v122/lambda_*_fresh_v2_confusion.csv
+```
+
+Reference:
+
+```text
+v1.2.1 Linear family-CV : 53.0%
+v1.2.1 Linear Fresh-v2  : 81.7%
+```
+
+The main question is whether lambda > 0 raises family-held-out CV while preserving the strong CUDA, Python, and Transformer transfer performance.
+
