@@ -10979,3 +10979,60 @@ References:
 
     v1.2.2 frozen final representation : 55.0%
     v1.2.5 adapted late-block best     : 54.7%
+### v1.2.7: Multi-Layer Semantic Fusion
+
+v1.2.6 found that Block1 had the best single-layer family-held-out separability at 60.7%, while Block4 and FinalNorm preserved different class-specific strengths. v1.2.7 tests whether those distributed signals can be combined.
+
+Candidate layers:
+
+    Block1
+    Block4
+    FinalNorm
+
+Fusion is simple concatenation. Evaluated feature sets:
+
+    Block1
+    Block4
+    FinalNorm
+    Block1 + Block4
+    Block1 + FinalNorm
+    Block4 + FinalNorm
+    Block1 + Block4 + FinalNorm
+
+Each feature set is evaluated with both:
+
+    Linear router
+    MLP router (input -> 128 -> 6)
+
+Evaluation remains 5-fold family-held-out CV on the 300-prompt semantic dataset, with the base LM completely frozen.
+
+New files:
+
+    multilayer_semantic_fusion_v127.py
+    run_multilayer_semantic_fusion_v127.py
+
+Run:
+
+    git fetch origin
+    git checkout v1.2.7
+    git pull origin v1.2.7
+    python run_multilayer_semantic_fusion_v127.py
+
+Outputs:
+
+    results/multilayer_semantic_fusion_v127/fusion.log
+    results/multilayer_semantic_fusion_v127/summary.csv
+    results/multilayer_semantic_fusion_v127/*_confusion.csv
+
+References:
+
+    v1.2.6 Block1 Linear : 60.7%
+    v1.2.6 Block4 Linear : 55.0%
+    v1.2.6 FinalNorm     : 53.3%
+
+Primary decision:
+
+    fusion > 60.7% -> routing benefits from semantic signals distributed across layers
+    fusion <= 60.7% -> Block1 remains the preferred routing tap point
+
+GPU recall is tracked separately because v1.2.6 showed weak GPU separability at every individual layer.
