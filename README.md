@@ -8926,3 +8926,82 @@ Output:
 results/llm_hardest_competitor_boost_sweep_v01113/boost_sweep.csv
 ```
 
+### v0.11.14: Canonical Entity Prefix Binding
+
+v0.11.13 showed that doubling the LLM rescue boost is enough to make the first token start with the LLM prefix, but the continuation still drifted:
+
+```text
+LLMARTです。
+```
+
+This means semantic selection and first-token binding were working, while canonical entity completion was not.
+
+v0.11.14 extends binding from only the first token to the complete tokenized canonical entity prefix.
+
+Canonical targets:
+
+```text
+tech_gpu         -> GPU
+tech_cpu         -> CPU
+tech_llm         -> LLM
+tech_transformer -> Transformer
+tech_cuda        -> CUDA
+tech_python      -> Python
+```
+
+Behavior:
+
+```text
+step 0:
+  use the existing learned v0.11.8 boost
+  use x2.00 only for the narrow LLM rescue path
+
+step 1..N while canonical prefix is incomplete:
+  boost the expected canonical token only as much as necessary
+  to exceed the current hardest vocabulary competitor by 0.50
+
+after the canonical entity is complete:
+  return immediately to normal LM generation
+```
+
+The continuation correction is therefore dynamic and minimal rather than a fixed forced-token value.
+
+All v0.11.11 thresholds and v0.11.12 LLM rescue safety conditions remain fixed.
+
+New files:
+
+```text
+evaluate_canonical_entity_prefix_binding_v01114.py
+run_canonical_entity_prefix_binding_v01114.py
+```
+
+No retraining is required.
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v0.11.14
+git pull origin v0.11.14
+
+python run_canonical_entity_prefix_binding_v01114.py
+```
+
+Primary target:
+
+```text
+G07 should begin with exactly "LLM" rather than "LLMART".
+```
+
+Safety checks:
+
+```text
+G05 -> CPU
+G09 -> CUDA
+G10 -> Python
+G21 -> binding OFF
+G27 -> GPU
+G28 -> CPU
+G30 -> comparison protected / binding OFF
+```
+
