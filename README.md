@@ -7927,3 +7927,53 @@ results/clean_intent_diagnostic_v0109/intent_full.log
 results/clean_intent_diagnostic_v0109/g05_focus.log
 ```
 
+
+
+### v0.11.0: Clean Semantic-to-Generation Binding
+
+v0.10.9 showed that G05 is already represented as CPU/general-purpose internally, but generation still starts with GPU. v0.11.0 therefore changes only the representation-to-generation bridge.
+
+Design:
+
+```text
+clean v0.8 hidden
+   -> frozen clean intent head (24 probabilities)
+   -> low-rank IntentEntityLogitBinding
+   -> vocabulary logit bias
+   -> applied ONLY at the first generated token
+```
+
+The v0.8 backbone and intent head remain frozen. The adapter is trained only on technical rows whose reference answer begins with the correct entity name. Exact prompts from the fixed 30-case benchmark are excluded.
+
+Technical gate:
+
+```text
+max technical-intent probability >= 0.50
+    -> first-token binding ON
+otherwise
+    -> binding OFF, base generation unchanged
+```
+
+This keeps nontechnical generation isolated from the new binding path and avoids the broad-output regression seen in earlier global-alignment experiments.
+
+New files:
+
+```text
+intent_entity_logit_binding_v0110.py
+train_intent_entity_logit_binding_v0110.py
+evaluate_intent_entity_logit_binding_v0110.py
+run_intent_entity_logit_binding_v0110.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v0.11.0
+git pull origin v0.11.0
+
+python run_intent_entity_logit_binding_v0110.py
+```
+
+Primary criterion: G05 should start with `CPU` while nontechnical cases remain unchanged. Direct-entity cases G08/G09/G10/G27/G28 are secondary regression guards.
+\n
