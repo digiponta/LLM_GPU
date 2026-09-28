@@ -58,22 +58,29 @@ class IntentEntityLogitBinding(nn.Module):
         return self.beta * self.up(torch.tanh(self.down(intent_prob)))
 
 
-def technical_confidence(
+def technical_gate(
     intent_prob: torch.Tensor,
     labels: Sequence[str],
-) -> torch.Tensor:
+    threshold: float,
+):
     indices = [
         labels.index(label)
         for label in TECHNICAL_LABELS
         if label in labels
     ]
     if not indices:
-        return torch.zeros(
+        z = torch.zeros(
             intent_prob.size(0),
             device=intent_prob.device,
             dtype=intent_prob.dtype,
         )
-    return intent_prob[:, indices].max(dim=-1).values
+        return z, torch.zeros_like(z, dtype=torch.bool), torch.zeros_like(z, dtype=torch.long)
+
+    values = intent_prob[:, indices]
+    confidence = values.max(dim=-1).values
+    active_count = (values >= float(threshold)).sum(dim=-1)
+    active = active_count == 1
+    return confidence, active, active_count
 
 
 def save_binding_checkpoint(
