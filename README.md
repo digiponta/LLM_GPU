@@ -9645,3 +9645,75 @@ results/llm_semantic_repair_v1006/evaluation.log
 
 The v1.0.1 held-out LLM prompts are not used as detector training examples.
 
+### v1.0.7: LLM Detector Hard-Negative Repair
+
+v1.0.6 improved held-out LLM recognition from 0/5 to 2/5, but produced false positives on a capital question and a Python question.
+
+v1.0.7 hardens the detector with additional non-LLM examples focused on the observed false-positive regions:
+
+```text
+capital / geography
+Python / programming language
+Transformer / model-structure prompts
+model-comparison prompts
+```
+
+The five v1.0.1 held-out LLM prompts are still not used for gradient training.
+
+Training now uses:
+
+```text
+30 LLM-positive prompts
+existing non-LLM negatives
+14 additional hard-negative training prompts
+6 held-back hard-negative guard prompts
+```
+
+Threshold selection explicitly prefers:
+
+```text
+zero false positives on the combined validation-negative
++ hard-negative guard set
+then maximum positive recall
+```
+
+New files:
+
+```text
+train_llm_semantic_detector_v1007.py
+run_llm_hard_negative_repair_v1007.py
+```
+
+The existing v1.0.6 integrated evaluator is reused with the new checkpoint.
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v.1.0.7
+git pull origin v.1.0.7
+
+python run_llm_hard_negative_repair_v1007.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v1.0.7-llm-detector-hard-negative.pt
+```
+
+Output:
+
+```text
+results/llm_hard_negative_repair_v1007/evaluation.log
+```
+
+Primary acceptance target:
+
+```text
+Original integrated benchmark = 30/30
+Held-out LLM >= 2/5
+No new LLM false-positive regression
+CUDA held-out remains 5/5
+```
+
