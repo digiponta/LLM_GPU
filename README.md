@@ -11705,3 +11705,58 @@ Outputs:
     results/symmetric_comparison_v137/comparison_per_class.csv
 
 The experiment changes only semantic comparison-data design. Base-model weights and routing policy remain unchanged.
+### v1.3.8: Layer-wise Relational Comparison Diagnostic
+
+v1.3.7 showed that symmetric six-class reciprocal comparison prompts collapsed at Block1 (5.0% within-axis accuracy), while non-comparison axes remained much stronger. v1.3.8 tests whether relational direction emerges in deeper Transformer layers.
+
+Dataset:
+
+    v1.3.7 symmetric comparison
+    60 prompts
+    6 classes
+    10 prompts/class
+
+Stages:
+
+    Embedding
+    Block1
+    Block2
+    Block3
+    Block4
+    Block5
+    Block6
+    FinalNorm
+
+At every stage, the final-token hidden vector is evaluated with the same Linear 256 -> 6 probe under 5-fold class-stratified CV.
+
+Base model weights remain completely frozen.
+
+Interpretation:
+
+    deeper layers >> Block1
+        -> relational direction is represented later than concept identity
+
+    all layers near chance
+        -> reciprocal contrast / negation relation is not stably represented by the current base model
+
+New files:
+
+    layerwise_relational_comparison_v138.py
+    run_layerwise_relational_comparison_v138.py
+
+Run:
+
+    git fetch origin
+    git checkout v1.3.8
+    git pull origin v1.3.8
+    python run_layerwise_relational_comparison_v138.py
+
+Outputs:
+
+    results/layerwise_relational_comparison_v138/diagnostic.log
+    results/layerwise_relational_comparison_v138/summary.csv
+    results/layerwise_relational_comparison_v138/*_confusion.csv
+
+Reference:
+
+    v1.3.7 Block1 symmetric comparison within-axis : 5.0%
