@@ -9510,3 +9510,55 @@ results/repair_override_policy_sweep_v1004/policy_sweep.csv
 
 The winning policy should be validated in real generation in the next step before replacing the current runtime decision rule.
 
+### v1.0.5: CUDA-only Safe Override
+
+v1.0.4 showed that a broad repair override improves held-out recognition but causes unacceptable regressions. The cleanest signal was CUDA: several held-out CUDA prompts were repaired correctly by the repair head while the runtime still trusted the raw GPU label.
+
+v1.0.5 therefore introduces a narrow CUDA-only override for evaluation:
+
+```text
+repair_top == tech_cuda
+raw_top != tech_cuda
+scope >= 0.70
+repair_conf >= 0.50
+```
+
+When active, generation is guided to:
+
+```text
+CUDAはNVIDIA GPUで汎用計算を行うための技術です。
+```
+
+The branch evaluates three guards:
+
+```text
+1. Original 30-case benchmark
+2. Held-out technical 30
+3. Held-out total 60, including the v1.0.2 conversational held-out repair
+```
+
+New files:
+
+```text
+evaluate_cuda_only_safe_override_v1005.py
+run_cuda_only_safe_override_v1005.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v.1.0.5
+git pull origin v.1.0.5
+
+python run_cuda_only_safe_override_v1005.py
+```
+
+Output:
+
+```text
+results/cuda_only_safe_override_v1005/evaluation.log
+```
+
+This branch is intentionally narrow: LLM repair is not overridden because v1.0.4 showed mixed correct and incorrect LLM repairs.
+
