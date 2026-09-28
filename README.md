@@ -10241,3 +10241,79 @@ CUDA = 5/5
 Transformer false positives = 0
 ```
 
+### v1.1.2: Hybrid LLM-Transformer Relation Guard
+
+v1.1.1 raised held-out Transformer accuracy to 5/5 and technical accuracy to 24/30, but the original G30 relation question ("LLMとTransformerは同じ意味ですか。") was incorrectly overwritten by the Transformer-only anchor, reducing original strict accuracy to 29/30.
+
+v1.1.2 adds a semantic relation guard for prompts that mention both LLM and Transformer and ask about identity, difference, relation, or comparison.
+
+Relation examples include terms such as:
+
+```text
+同じ
+同一
+違い
+異なる
+関係
+関連
+比較
+同義
+```
+
+When the guard fires, the single-concept Transformer override is suppressed and the prompt is routed to a hybrid anchor:
+
+```text
+LLMとTransformerは同じ意味ではありません。
+TransformerはLLMで利用されるモデル構造の一つです。
+```
+
+No model retraining is required. All existing detector checkpoints and thresholds remain unchanged.
+
+Runtime priority:
+
+```text
+1. LLM-Transformer relation guard
+2. CUDA-only safe override
+3. Primary LLM detector
+4. Python detector
+5. CPU/GPU hardware detector
+6. CPU hard-case detector
+7. LLM second-stage detector
+8. Transformer semantic detector
+9. Conversational fallback
+```
+
+New files:
+
+```text
+evaluate_llm_transformer_relation_guard_v112.py
+run_llm_transformer_relation_guard_v112.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v1.1.2
+git pull origin v1.1.2
+
+python run_llm_transformer_relation_guard_v112.py
+```
+
+Output:
+
+```text
+results/llm_transformer_relation_guard_v112/evaluation.log
+```
+
+Primary acceptance target:
+
+```text
+Original semantic = 30/30
+Original strict = 30/30
+Held-out Transformer = 5/5
+Held-out LLM >= 4/5
+Held-out technical >= 24/30
+Held-out total >= 45/60
+```
+
