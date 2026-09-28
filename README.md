@@ -8586,3 +8586,87 @@ G28 -> CPU
 G30 comparison remains protected
 ```
 
+### v0.11.9: Semantic Intent Repair / Calibration
+
+v0.11.8 stabilized multi-concept generation binding, but the remaining failures were primarily technical-intent recognition errors:
+
+```text
+G07 LLM         : tech_llm confidence too low
+G08 Transformer : tech_cuda ranked above tech_transformer
+G10 Python      : tech_python correct but below the 0.70 gate
+```
+
+v0.11.9 leaves both the base language model and the v0.8 intent head frozen. It adds a small residual calibrator only over the six technical intent logits:
+
+```text
+tech_gpu
+tech_cpu
+tech_llm
+tech_transformer
+tech_cuda
+tech_python
+```
+
+Architecture:
+
+```text
+frozen v0.8 intent logits
+        ↓
+extract six technical logits
+        ↓
+TechnicalIntentCalibrator
+        ↓
+six calibrated technical logits
+        ↓
+softmax ranking/confidence used only for the safety gate
+```
+
+The frozen v0.11.8 binding adapter still receives the original intent probabilities and role probabilities. Calibration therefore changes only concept selection and gate confidence, not the learned generation boost mapping.
+
+Training uses 24 technical paraphrases with no exact overlap with the fixed 30-case benchmark. The loss combines six-way cross entropy with a small confidence-margin term targeting 0.75 probability for the correct technical concept.
+
+Safety behavior remains:
+
+```text
+CPU/GPU:
+  calibrated top concept must be CPU/GPU
+  original CPU/GPU relative intent margin still applies
+  controller/executor role margin still applies
+
+LLM / Transformer / CUDA / Python:
+  calibrated top probability >= 0.70
+  canonical answer name must not already appear in the prompt
+```
+
+New files:
+
+```text
+technical_intent_calibrator_v0119.py
+train_technical_intent_calibrator_v0119.py
+evaluate_calibrated_multi_concept_binding_v0119.py
+run_technical_intent_calibration_v0119.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v0.11.9
+git pull origin v0.11.9
+
+python run_technical_intent_calibration_v0119.py
+```
+
+Primary checks:
+
+```text
+G05 -> CPU remains correct
+G07 -> LLM
+G08 -> Transformer
+G09 -> CUDA remains correct
+G10 -> Python
+G27 -> GPU
+G28 -> CPU
+G30 comparison remains protected
+```
+
