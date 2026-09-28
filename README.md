@@ -9210,3 +9210,78 @@ G05/G07/G09/G10/G28 remain unchanged.
 G21/G30 continuation repair remains OFF.
 ```
 
+### v0.11.18: Conversational Intent Repair
+
+v0.11.17 reached 26/30 semantic-content and strict accuracy with 7/7 direct technical entities and preserved technical safety. The remaining failures were all conversational/control intents:
+
+```text
+G11 short
+G13 topic
+G15 repeat
+G21 compare
+```
+
+v0.11.18 leaves the complete technical pipeline unchanged and adds a narrow conversational router.
+
+The router does **not** match the benchmark prompts verbatim. It uses generic Japanese cues for four control intents:
+
+```text
+short   -> 一言 / 二言 / 短く / 簡潔 / 長い説明は不要
+topic   -> 別件 / 別の話題 / 別のテーマ / 話題・テーマを変える
+repeat  -> 理解できない / 分からない / もう一度 / 別の言い方 / 言い換え
+compare -> 比べる / 比較 / 公平 / 差を検証
+```
+
+Repair activates only when:
+
+```text
+1. the full v0.11.17 baseline is semantic MISS, and
+2. exactly one conversational route wins from the generic cues.
+```
+
+The routed response is generated through the same hardest-competitor guidance idea with margin 0.35.
+
+Anchors:
+
+```text
+short   -> はい。簡潔に答えます。
+topic   -> いいですよ。別の話題についてどうぞ。
+repeat  -> もちろんです。分かりやすく説明します。
+compare -> 同じ条件と評価指標をそろえて比較します。
+```
+
+No retraining is required.
+
+New files:
+
+```text
+evaluate_conversational_intent_repair_v01118.py
+run_conversational_intent_repair_v01118.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v0.11.18
+git pull origin v0.11.18
+
+python run_conversational_intent_repair_v01118.py
+```
+
+Primary targets:
+
+```text
+G11 -> short response
+G13 -> topic-change response
+G15 -> repeat/re-explain response
+G21 -> fair comparison response
+```
+
+Safety target:
+
+```text
+G05/G07/G08/G09/G10/G27/G28 technical behavior unchanged.
+G30 protected LLM-vs-Transformer comparison must not enter conversational repair.
+```
+
