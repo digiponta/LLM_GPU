@@ -12075,3 +12075,75 @@ Outputs:
 
     results/explicit_role_span_v143/diagnostic.log
     results/explicit_role_span_v143/summary.csv
+### v1.4.4: Structured Semantic Composition
+
+v1.4.3 showed that simply concatenating Concept spans and a relation vector with a Linear head did not recover semantic role binding. v1.4.4 replaces learned role classification with explicit structured composition.
+
+Independent predictions:
+
+    Concept1 : 6-way from span1
+    Concept2 : 6-way from span2
+    Target Position : 2-way from the natural-language relation phrase
+
+Deterministic binding:
+
+    if TargetPosition == FIRST:
+        Target = Concept1
+    else:
+        Target = Concept2
+
+This directly tests the structured semantic representation:
+
+    Semantic = Concepts + Relation/TargetPosition + explicit binding
+
+Evaluations:
+
+    mixed-order 5-fold CV
+    reconstructed Target accuracy
+    gold concepts + predicted position oracle
+    predicted concepts + gold position oracle
+    target-first -> contrast-first transfer
+    contrast-first -> target-first transfer
+
+Stages:
+
+    Block1
+    Block2
+    Block3
+    Block4
+    Block5
+    Block6
+    FinalNorm
+
+Reference:
+
+    v1.4.3 best reconstructed Target CV : 16.7%
+    six-class chance                    : 16.7%
+
+Interpretation:
+
+    large Target improvement
+        -> missing operation was explicit role binding rather than concept recognition
+
+    gold concepts oracle high, gold position oracle low
+        -> concept classification is the bottleneck
+
+    gold position oracle high, gold concepts oracle low
+        -> target-position relation decoding is the bottleneck
+
+New files:
+
+    structured_semantic_composition_v144.py
+    run_structured_semantic_composition_v144.py
+
+Run:
+
+    git fetch origin
+    git checkout v1.4.4
+    git pull origin v1.4.4
+    python run_structured_semantic_composition_v144.py
+
+Outputs:
+
+    results/structured_semantic_composition_v144/diagnostic.log
+    results/structured_semantic_composition_v144/summary.csv
