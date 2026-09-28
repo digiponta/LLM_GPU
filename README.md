@@ -8344,3 +8344,75 @@ python run_first_token_competitor_diagnostic_v0115.py
 
 The next correction should be based on the actual top competing token rather than increasing CPU-GPU correction strength blindly.
 
+### v0.11.6: Hardest-Competitor Margin Binding
+
+v0.11.5 showed that G05 is not a CPU-vs-GPU-only problem. After v0.11.4 correction, the first-token ranking became:
+
+```text
+1. D
+2. G
+3. CPU
+```
+
+Therefore v0.11.6 trains against the full vocabulary rather than only the CPU/GPU pair.
+
+For each CPU/GPU training row, the correct first token is selected:
+
+```text
+CPU target -> token "CPU"
+GPU target -> first token "G"
+```
+
+The adapter predicts a non-negative boost for that target only. The loss is:
+
+```text
+target_logit + boost >= max(all other vocabulary logits) + margin
+```
+
+with default margin 0.5.
+
+Architecture:
+
+```text
+frozen clean intent probabilities
++
+frozen controller/executor probabilities
+        ↓
+HardestCompetitorBoost
+        ↓
+non-negative target boost
+        ↓
+boost only the selected correct first token
+```
+
+No competing token is explicitly suppressed, and no unrelated vocabulary logit is modified.
+
+New files:
+
+```text
+hardest_competitor_binding_v0116.py
+train_hardest_competitor_binding_v0116.py
+evaluate_hardest_competitor_binding_v0116.py
+run_hardest_competitor_binding_v0116.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v0.11.6
+git pull origin v0.11.6
+
+python run_hardest_competitor_binding_v0116.py
+```
+
+Primary criterion:
+
+```text
+G05 -> CPU
+G27 -> GPU
+G28 -> CPU
+```
+
+The evaluator also prints the target boost, the base winner, the after-binding winner, and the target/winner logits for every activated case.
+
