@@ -9346,3 +9346,45 @@ Output:
 results/heldout_generalization_v1001/evaluation.log
 ```
 
+### v1.0.2: Held-out Evaluator Fix
+
+v1.0.1 exposed an evaluator bug: the conversational repair path still depended on the original 30-case `CASES` table. Because all held-out prompts were intentionally new, the repair path was never allowed to activate.
+
+v1.0.2 removes that dependency from held-out evaluation.
+
+New held-out trigger:
+
+```text
+1. Generate the v0.11.17 baseline.
+2. Score the baseline with the held-out case's own required/forbidden groups.
+3. If the held-out baseline is PASS, keep it unchanged.
+4. If it is MISS, call the generic conversational cue router directly.
+5. If exactly one route wins, generate the corresponding guided response.
+6. Score the final reply using the same held-out requirements.
+```
+
+This allows repair precision, recall, and false-activation rate to be measured correctly on unseen prompts.
+
+New files:
+
+```text
+evaluate_heldout_generalization_v1002.py
+run_heldout_generalization_v1002.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v.1.0.2
+git pull origin v.1.0.2
+
+python run_heldout_generalization_v1002.py
+```
+
+Output:
+
+```text
+results/heldout_generalization_v1002/evaluation.log
+```
+
