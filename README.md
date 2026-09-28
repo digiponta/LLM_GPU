@@ -9869,3 +9869,79 @@ Held-out CUDA = 5/5
 Python false positives = 0
 ```
 
+### v1.0.10: CPU/GPU Hardware Semantic Disambiguation
+
+v1.0.9 improved held-out Python from 1/5 to 3/5 while preserving the original integrated benchmark at 30/30 and CUDA at 5/5.
+
+The remaining hardware confusion was concentrated in CPU and GPU. v1.0.10 adds a dedicated three-class semantic detector:
+
+```text
+CPU
+GPU
+OTHER
+```
+
+Using an explicit OTHER class prevents unrelated prompts from being forced into a CPU/GPU decision.
+
+Architecture:
+
+```text
+Frozen base hidden state (256)
+        ↓
+MLP 256 -> 48 -> 3
+        ↓
+CPU / GPU / OTHER probabilities
+```
+
+Runtime priority:
+
+```text
+1. Existing technical pipeline
+2. CUDA-only safe override
+3. LLM detector at fixed threshold 0.70
+4. Python detector
+5. CPU/GPU hardware detector
+6. Conversational fallback
+```
+
+New files:
+
+```text
+train_cpu_gpu_semantic_detector_v1010.py
+evaluate_cpu_gpu_semantic_repair_v1010.py
+run_cpu_gpu_semantic_repair_v1010.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v.1.0.10
+git pull origin v.1.0.10
+
+python run_cpu_gpu_semantic_repair_v1010.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v1.0.10-cpu-gpu-detector.pt
+```
+
+Output:
+
+```text
+results/cpu_gpu_semantic_repair_v1010/evaluation.log
+```
+
+Primary acceptance target:
+
+```text
+Original integrated = 30/30
+GPU > 2/5
+CPU > 2/5
+Python >= 3/5
+CUDA = 5/5
+Hardware false positives = 0
+```
+
