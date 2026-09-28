@@ -10085,3 +10085,76 @@ CUDA = 5/5
 CPU false positives = 0
 ```
 
+### v1.1.0: LLM Hard-Case Second-Stage Repair
+
+v1.0.12 preserved the original integrated benchmark at 30/30 and improved held-out technical accuracy to 20/30. The weakest remaining technical class was LLM at 2/5.
+
+v1.1.0 adds a second-stage LLM detector trained on indirect descriptions of language-model behavior. The original LLM detector remains fixed at threshold 0.70.
+
+Architecture:
+
+```text
+Frozen base hidden state (256)
+        ↓
+MLP 256 -> 32 -> 1
+        ↓
+second-stage LLM probability
+```
+
+The second-stage detector is evaluated only after all higher-priority safe overrides remain inactive:
+
+```text
+1. Existing technical pipeline
+2. CUDA-only safe override
+3. Primary LLM detector at 0.70
+4. Python detector
+5. CPU/GPU hardware detector at 0.93
+6. CPU hard-case detector
+7. LLM second-stage detector
+8. Conversational fallback
+```
+
+Training positives emphasize indirect LLM descriptions such as next-token prediction, text generation, context-based continuation, and natural-language response generation. Hard negatives include Transformer architecture, Python, CPU/GPU, CUDA, generic model questions, and conversational prompts.
+
+New files:
+
+```text
+train_llm_second_stage_detector_v110.py
+evaluate_llm_second_stage_repair_v110.py
+run_llm_second_stage_repair_v110.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v1.1.0
+git pull origin v1.1.0
+
+python run_llm_second_stage_repair_v110.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v1.1.0-llm-second-stage.pt
+```
+
+Output:
+
+```text
+results/llm_second_stage_repair_v110/evaluation.log
+```
+
+Primary acceptance target:
+
+```text
+Original integrated = 30/30
+LLM > 2/5
+GPU >= 4/5
+CPU >= 3/5
+Python >= 3/5
+CUDA = 5/5
+LLM second-stage false positives = 0
+```
+
