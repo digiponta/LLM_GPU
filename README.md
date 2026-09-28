@@ -12147,3 +12147,63 @@ Outputs:
 
     results/structured_semantic_composition_v144/diagnostic.log
     results/structured_semantic_composition_v144/summary.csv
+### v1.4.5: Relation Phrase Paraphrase Generalization
+
+v1.4.4 achieved 98.3% reconstructed Target accuracy with structured Concept1 / Concept2 / TargetPosition composition. However, its cross-position split was confounded because one TargetPosition label could disappear from training. v1.4.5 replaces that split with leave-one-relation-family-out evaluation.
+
+Relation data:
+
+    5 wording families
+    2 labels: FIRST target / SECOND target
+    2 paraphrases per label per family
+    20 relation phrases total
+
+Families:
+
+    direct
+    select
+    ordinal
+    contrast
+    referent
+
+Every train/test split contains both semantic labels. Only wording family is held out.
+
+Evaluation:
+
+    leave one relation wording family out
+    predict TargetPosition from unseen relation phrasing
+    combine with Concept1/Concept2 predictions
+    deterministic binding reconstructs Target Concept
+
+Stages:
+
+    Block1
+    Block2
+    Block3
+    Block4
+    Block5
+    Block6
+    FinalNorm
+
+Reference:
+
+    v1.4.4 reconstructed Target CV : 98.3%
+    binary relation chance         : 50.0%
+
+New files:
+
+    semantic_relation_paraphrase_v145.py
+    relation_paraphrase_generalization_v145.py
+    run_relation_paraphrase_generalization_v145.py
+
+Run:
+
+    git fetch origin
+    git checkout v1.4.5
+    git pull origin v1.4.5
+    python run_relation_paraphrase_generalization_v145.py
+
+Outputs:
+
+    results/relation_paraphrase_generalization_v145/diagnostic.log
+    results/relation_paraphrase_generalization_v145/summary.csv
