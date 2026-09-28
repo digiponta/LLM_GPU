@@ -107,7 +107,6 @@ def train_once(X_train, y_train, arch, hidden, epochs, lr, weight_decay, seed):
     return model
 
 
-@torch.no_grad()
 def evaluate_arch(X, y, prompts, folds, arch, hidden, epochs, lr, weight_decay, seeds):
     n = X.shape[0]
     ensemble_probs = torch.zeros((n, len(CLASSES)), dtype=torch.float32)
