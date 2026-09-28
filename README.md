@@ -11933,3 +11933,75 @@ Outputs:
 
     results/tokenwise_relation_direction_v141/diagnostic.log
     results/tokenwise_relation_direction_v141/summary.csv
+### v1.4.2: Role-Position Disentanglement Diagnostic
+
+v1.4.1 found direction accuracy above chance with first-half pooling (peak 63.3%), but the prompt template always placed the target description before the contrast description. v1.4.2 removes that confound by independently varying semantic role and surface order.
+
+Dataset construction:
+
+    30 semantic comparison topics
+    2 target roles per topic
+    2 surface orders per target role
+    120 prompts total
+
+Surface orders:
+
+    target-first
+    contrast-first
+
+Role label:
+
+    canonical-first concept is target
+    canonical-second concept is target
+
+Because each target role appears in both surface orders, Role and Position are no longer equivalent.
+
+Evaluations:
+
+    mixed-order 5-fold Role CV
+    mixed-order Position CV
+    mixed-order Pair 15-way CV
+    reconstructed Target accuracy
+    target-first -> contrast-first transfer
+    contrast-first -> target-first transfer
+
+Representations:
+
+    final_token
+    mean_all
+    mean_first_half
+    mean_second_half
+    mean_first_second_concat
+
+across Block1-6 and FinalNorm.
+
+Interpretation:
+
+    mixed Role high + cross-position Role near 50%
+        -> apparent direction signal is mainly a surface-position shortcut
+
+    cross-position Role clearly above 50%
+        -> target/contrast role is represented independently of word order
+
+Reference:
+
+    v1.4.1 best first-half direction : 63.3%
+    binary chance                    : 50.0%
+
+New files:
+
+    semantic_role_position_v142.py
+    role_position_disentanglement_v142.py
+    run_role_position_disentanglement_v142.py
+
+Run:
+
+    git fetch origin
+    git checkout v1.4.2
+    git pull origin v1.4.2
+    python run_role_position_disentanglement_v142.py
+
+Outputs:
+
+    results/role_position_disentanglement_v142/diagnostic.log
+    results/role_position_disentanglement_v142/summary.csv
