@@ -23,7 +23,6 @@ DEFAULT_ROLE = "model/model-gpu-v0.11.2-cpu-gpu-role-binding.pt"
 DEFAULT_OUTPUT = "model/model-gpu-v0.11.3-direct-cpu-gpu-gap-binding.pt"
 
 SEED = 42
-TARGET_MARGIN = 1.0
 
 
 def parse_args():
@@ -39,6 +38,7 @@ def parse_args():
     p.add_argument("--max-delta", type=float, default=12.0)
     p.add_argument("--l2-weight", type=float, default=1e-4)
     p.add_argument("--patience", type=int, default=30)
+    p.add_argument("--target-margin", type=float, default=1.0)
     return p.parse_args()
 
 
@@ -138,7 +138,7 @@ def main():
         delta = adapter(features[indices])
         corrected_gap = base_gap[indices] + delta
         signed_gap = signs[indices] * corrected_gap
-        hinge = F.relu(TARGET_MARGIN - signed_gap).mean()
+        hinge = F.relu(args.target_margin - signed_gap).mean()
         reg = delta.pow(2).mean()
         total = hinge + args.l2_weight * reg
         return total, hinge, reg, delta, corrected_gap
@@ -150,7 +150,7 @@ def main():
     print("Base model / intent head / role head: frozen")
     print("Rows:", len(rows), "Train:", len(train_idx), "Val:", len(val_idx))
     print("Exact DEV overlap:", len(overlap))
-    print("Target signed margin:", TARGET_MARGIN)
+    print("Target signed margin:", args.target_margin)
     print("CPU token:", cpu_id, "GPU token:", gpu_id)
     print("Input dim:", features.size(1), "Hidden dim:", args.hidden_dim)
 
@@ -203,7 +203,7 @@ def main():
         intent_head=args.intent_head,
         cpu_token_id=cpu_id,
         gpu_token_id=gpu_id,
-        target_margin=TARGET_MARGIN,
+        target_margin=args.target_margin,
         intent_margin_threshold=0.10,
         role_margin_threshold=0.05,
         learning_rate=args.lr,
