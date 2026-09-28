@@ -44,6 +44,7 @@ def save_checkpoint(filename, relation_head, binding, labels:Sequence[str], targ
         "d_model":relation_head.net[0].in_features,
         "rank":binding.rank,
         "beta":binding.beta,
+        "vocab_size":binding.vocab_size,
         **meta,
     },filename)
 
@@ -53,10 +54,14 @@ def load_checkpoint(filename, labels:Sequence[str], device):
         raise ValueError("Intent label order mismatch.")
     rh=RelationHead(int(ck["d_model"])).to(device)
     rh.load_state_dict(ck["relation_head_state"]); rh.eval()
-    b=RelationalEntityBinding(len(labels),len(RELATION_LABELS),len(ck["target_token_ids"]) and int(ck.get("vocab_size",0)) or 0)
-    # Rebuild with stored binding tensor shapes when vocab_size metadata absent.
     up_w=ck["binding_state"]["up.weight"]
     down_w=ck["binding_state"]["down.weight"]
-    b=RelationalEntityBinding(len(labels),len(RELATION_LABELS),up_w.shape[0],down_w.shape[0],float(ck.get("beta",1.0))).to(device)
+    b=RelationalEntityBinding(
+        len(labels),
+        len(RELATION_LABELS),
+        int(ck.get("vocab_size", up_w.shape[0])),
+        int(ck.get("rank", down_w.shape[0])),
+        float(ck.get("beta",1.0)),
+    ).to(device)
     b.load_state_dict(ck["binding_state"]); b.eval()
     return rh,b,ck
