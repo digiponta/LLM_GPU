@@ -9449,3 +9449,64 @@ python run_technical_generalization_diagnostic_v1003.py
 
 The diagnostic should identify whether the next improvement should target semantic recognition, entity binding, or post-entity generation.
 
+### v1.0.4: Repair Override Policy Sweep
+
+v1.0.3 showed that 20/21 technical held-out failures were recognition failures, while binding/generation were largely healthy.
+
+v1.0.4 isolates the **repair decision policy** from generation and compares multiple override rules using frozen prompt features.
+
+Datasets:
+
+```text
+Held-out technical : 30 cases
+Original technical guard : 10 cases
+```
+
+Policies:
+
+```text
+P0 current
+P1 confidence-only thresholds
+P2 scope + confidence thresholds
+P3 disagreement + confidence thresholds
+P4 concept-specific thresholds
+```
+
+Metrics:
+
+```text
+chosen-concept accuracy
+override count
+helpful overrides
+wrong overrides
+original technical guard accuracy
+```
+
+The sweep selects the best candidate that preserves all original technical selections when possible. No generation policy is changed yet; this branch is diagnostic only.
+
+New files:
+
+```text
+repair_override_policy_sweep_v1004.py
+run_repair_override_policy_sweep_v1004.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v.1.0.4
+git pull origin v.1.0.4
+
+python run_repair_override_policy_sweep_v1004.py
+```
+
+Outputs:
+
+```text
+results/repair_override_policy_sweep_v1004/policy_sweep.log
+results/repair_override_policy_sweep_v1004/policy_sweep.csv
+```
+
+The winning policy should be validated in real generation in the next step before replacing the current runtime decision rule.
+
