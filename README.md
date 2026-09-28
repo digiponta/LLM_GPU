@@ -10581,3 +10581,89 @@ Calibrated score router   : about 60%
 
 If hidden-state cross-validation is clearly above the calibration reference, v1.2.x should continue with the unified hidden-state router architecture rather than adding more serial concept-specific detectors.
 
+### v1.2.1: Expanded Unified Semantic Router Dataset
+
+v1.2.0 achieved 63.3% five-fold CV accuracy with both Linear and MLP hidden-state routers on the 60-prompt Fresh-v2 technical development set. The main remaining weakness was GPU/CPU separation, while CUDA and Python were substantially stronger.
+
+v1.2.1 expands semantic router training data to:
+
+```text
+6 classes x 50 prompts = 300 prompts
+
+GPU
+CPU
+LLM
+Transformer
+CUDA
+Python
+```
+
+Each class contains five semantic families with ten prompts per family. The dataset intentionally includes hard contrasts such as:
+
+```text
+GPU vs CPU
+GPU vs CUDA
+CPU vs GPU
+LLM vs Transformer
+Transformer vs LLM
+CUDA vs GPU
+Python vs model/hardware concepts
+```
+
+To reduce paraphrase leakage, cross-validation is family-held-out rather than random-prompt CV:
+
+```text
+5 folds
+1 unseen semantic family per class per fold
+60 test prompts per fold
+240 training prompts per fold
+```
+
+Both router architectures are evaluated again:
+
+```text
+Linear : 256 -> 6
+MLP    : 256 -> 64 -> GELU -> Dropout -> 6
+```
+
+After cross-validation, each architecture is also trained on all 300 expanded prompts and checked against the 60 technical Fresh-v2 prompts as a development transfer test.
+
+New files:
+
+```text
+semantic_router_dataset_v121.py
+unified_hidden_router_cv_v121.py
+run_unified_hidden_router_cv_v121.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v1.2.1
+git pull origin v1.2.1
+
+python run_unified_hidden_router_cv_v121.py
+```
+
+Outputs:
+
+```text
+results/unified_hidden_router_cv_v121/cv.log
+results/unified_hidden_router_cv_v121/summary.csv
+results/unified_hidden_router_cv_v121/linear_cv_predictions.csv
+results/unified_hidden_router_cv_v121/linear_cv_confusion.csv
+results/unified_hidden_router_cv_v121/linear_fresh_v2_confusion.csv
+results/unified_hidden_router_cv_v121/mlp_cv_predictions.csv
+results/unified_hidden_router_cv_v121/mlp_cv_confusion.csv
+results/unified_hidden_router_cv_v121/mlp_fresh_v2_confusion.csv
+```
+
+Reference:
+
+```text
+v1.2.0 hidden-state CV: 63.3%
+```
+
+The main question for v1.2.1 is whether broader semantic training data improves GPU/CPU recognition without sacrificing the strong CUDA, Python, and Transformer separation already observed.
+
