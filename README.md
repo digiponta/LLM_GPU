@@ -11322,3 +11322,68 @@ Interpretation:
     low source-pair-to-others -> that family pair is a poor teaching basis for the general GPU-vs-CPU boundary
 
 The purpose is diagnostic only; no routing policy or base-model weights are changed.
+### v1.3.2: Family-Invariant GPU-CPU Representation Learning
+
+v1.3.1 showed a strong diagnostic split: within-family GPU/CPU pairs were 100% separable, but leave-target-pair-out generalization averaged only 39.0%. This indicates family-specific local separation without a transferable global GPU-vs-CPU concept boundary.
+
+v1.3.2 learns a semantic adapter on top of frozen Block1 representations.
+
+Architecture:
+
+    frozen Block1 hidden (256)
+        -> residual semantic adapter 256 -> 128 -> 256
+        -> GPU/CPU binary head
+
+The residual adapter starts at the original Block1 representation.
+
+Training objective:
+
+    Binary CrossEntropy
+    + 0.10 * class compactness
+    + 0.50 * GPU/CPU centroid separation
+    + 1.00 * family-invariance loss
+    + 0.25 * representation-preservation loss
+
+Primary evaluation:
+
+    25 target GPU-family x CPU-family leave-pair-out tests
+
+For each target pair, the adapter sees the other four GPU families and four CPU families, while the target GPU and CPU families remain unseen.
+
+Secondary evaluation:
+
+    5-fold 6-class family-held-out routing
+
+A new 6-class Linear probe is trained on adapted representations to verify that GPU/CPU boundary learning does not destroy broader semantic routing.
+
+References:
+
+    v1.3.1 leave-pair-out mean : 39.0%
+    v1.2.7 Block1 6-class      : 60.7%
+
+Targets:
+
+    leave-pair-out mean >= 60%
+    keep 6-class accuracy near the 60.7% Block1 reference
+
+New files:
+
+    family_invariant_gpu_cpu_v132.py
+    run_family_invariant_gpu_cpu_v132.py
+
+Run:
+
+    git fetch origin
+    git checkout v1.3.2
+    git pull origin v1.3.2
+    python run_family_invariant_gpu_cpu_v132.py
+
+Outputs:
+
+    results/family_invariant_gpu_cpu_v132/family_invariant.log
+    results/family_invariant_gpu_cpu_v132/leave_pair_out_accuracy.csv
+    results/family_invariant_gpu_cpu_v132/leave_pair_out_details.csv
+    results/family_invariant_gpu_cpu_v132/six_class_confusion.csv
+    results/family_invariant_gpu_cpu_v132/summary.csv
+
+If leave-pair-out remains low despite the family-invariant objective, the next hypothesis is that frozen Block1 does not contain enough transferable GPU/CPU structure and semantic supervision must reach base-model representation learning.
