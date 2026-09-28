@@ -11760,3 +11760,52 @@ Outputs:
 Reference:
 
     v1.3.7 Block1 symmetric comparison within-axis : 5.0%
+### v1.3.9: Relational Semantic Representation Diagnostic
+
+v1.3.8 showed that six-class reciprocal comparison remains near chance across all layers (best Block3 = 20.0%). v1.3.9 decomposes the problem into concept identity and role direction.
+
+Dataset:
+
+    v1.3.7 symmetric reciprocal comparison
+    60 prompts
+    6 classes
+    15 unordered class pairs
+
+At every stage (Embedding, Block1-6, FinalNorm), independent Linear heads predict:
+
+    Target class      : 6-way
+    Contrast class    : 6-way
+    Unordered pair    : 15-way
+
+Derived diagnostics:
+
+    unordered pair reconstructed from target+contrast heads
+    strict ordered target+contrast accuracy
+    direction accuracy conditioned on the unordered pair being recognized
+
+Interpretation:
+
+    high unordered-pair + low ordered-role
+        -> both concepts are represented, but target/contrast direction is lost
+
+    low unordered-pair
+        -> even concept-pair identity is not stably recoverable from the final-token hidden vector
+
+This directly tests whether semantic data should be represented as structured concept + role/relation information instead of a single undifferentiated vector.
+
+New files:
+
+    relational_semantic_representation_v139.py
+    run_relational_semantic_representation_v139.py
+
+Run:
+
+    git fetch origin
+    git checkout v1.3.9
+    git pull origin v1.3.9
+    python run_relational_semantic_representation_v139.py
+
+Outputs:
+
+    results/relational_semantic_representation_v139/diagnostic.log
+    results/relational_semantic_representation_v139/summary.csv
