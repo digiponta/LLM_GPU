@@ -9388,3 +9388,64 @@ Output:
 results/heldout_generalization_v1002/evaluation.log
 ```
 
+### v1.0.3: Technical Semantic Generalization Diagnostic
+
+v1.0.2 showed that the remaining held-out bottleneck is mainly technical semantic generalization.
+
+v1.0.3 does not change model behavior. It diagnoses the 30 held-out technical cases:
+
+```text
+gpu / cpu / llm / transformer / cuda / python
+5 cases each = 30 technical cases
+```
+
+For each case it records:
+
+```text
+expected concept/entity
+raw technical intent
+raw margin
+repaired intent
+repair confidence
+technical scope
+chosen concept
+chosen confidence
+binding ON/OFF
+actual generated entity
+semantic PASS/MISS
+```
+
+Failures are classified into three stages:
+
+```text
+recognition:
+    chosen concept != expected concept
+
+binding:
+    chosen concept == expected,
+    but expected canonical entity is not generated
+
+generation:
+    expected entity is generated,
+    but required semantic content is still missing
+```
+
+Outputs:
+
+```text
+results/technical_generalization_v1003/diagnostic.log
+results/technical_generalization_v1003/diagnostic.csv
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v.1.0.3
+git pull origin v.1.0.3
+
+python run_technical_generalization_diagnostic_v1003.py
+```
+
+The diagnostic should identify whether the next improvement should target semantic recognition, entity binding, or post-entity generation.
+
