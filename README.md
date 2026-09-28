@@ -10737,4 +10737,70 @@ v1.2.1 Linear Fresh-v2  : 81.7%
 ```
 
 The main question is whether lambda > 0 raises family-held-out CV while preserving the strong CUDA, Python, and Transformer transfer performance.
+### v1.2.3: Base Representation Adaptation
 
+v1.2.2 improved family-held-out CV only slightly, from 53.0% to 55.0%, with the best supervised-contrastive weight at 0.10. Fresh-v2 transfer remained strong at 81.7%. This suggests that the frozen final hidden representation is still the main bottleneck for semantic-family invariance.
+
+v1.2.3 therefore adapts the late base representation instead of only training an external router.
+
+Trainable path:
+
+    Embedding + Blocks 1-4 : frozen
+    Blocks 5-6             : low-LR trainable
+    FinalNorm              : trainable
+    Semantic projection    : 256 -> 64
+    6-class router         : trainable
+
+Loss:
+
+    L = CrossEntropy
+      + 0.10 * SupervisedContrastiveLoss
+      + alpha * RepresentationPreservationLoss
+
+The preservation term is MSE between the adapted final hidden state and the original clean-base final hidden state.
+
+Preservation sweep:
+
+    alpha = 0.0, 0.1, 0.5, 1.0
+
+Learning rates:
+
+    Blocks 5-6 + FinalNorm : 1e-5
+    Projection + Router    : 8e-4
+
+For efficiency, Embedding + Blocks 1-4 are executed once and cached. Training then operates on cached sequence states.
+
+Evaluation:
+
+    300 prompts
+    6 classes
+    5-fold family-held-out CV
+    2 seeds per fold
+
+The experiment also reports mean hidden drift:
+
+    drift = mean(1 - cosine(adapted_hidden, original_hidden))
+
+New files:
+
+    base_representation_adaptation_cv_v123.py
+    run_base_representation_adaptation_v123.py
+
+Run:
+
+    git fetch origin
+    git checkout v1.2.3
+    git pull origin v1.2.3
+    python run_base_representation_adaptation_v123.py
+
+Outputs:
+
+    results/base_representation_adaptation_v123/adaptation.log
+    results/base_representation_adaptation_v123/summary.csv
+    results/base_representation_adaptation_v123/preservation_*_cv_confusion.csv
+
+Reference:
+
+    v1.2.2 best family-CV : 55.0%
+
+The main decision is whether adapting Blocks 5-6 materially improves unseen-family recognition while keeping hidden-state drift small.
