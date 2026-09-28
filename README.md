@@ -8745,3 +8745,71 @@ G28 -> CPU
 G30 -> comparison remains protected
 ```
 
+### v0.11.11: Selective Repair Threshold Sweep
+
+v0.11.10 showed that the selective-repair architecture is safer than the global calibrator, but the remaining failures are sensitive to threshold choices rather than model structure.
+
+v0.11.11 freezes all learned components and sweeps only three thresholds:
+
+```text
+repair_margin_threshold
+  0.20 / 0.25 / 0.30
+
+scope_threshold
+  0.50 / 0.60 / 0.70
+
+binding_confidence_threshold
+  0.45 / 0.55 / 0.70
+```
+
+This gives 27 combinations.
+
+No retraining is performed. The sweep uses:
+
+```text
+frozen clean v0.8 base model
+frozen clean v0.8 intent head
+frozen v0.11.2 role head
+frozen v0.11.8 multi-concept binding
+frozen v0.11.10 selective repair
+```
+
+Mandatory safety guards:
+
+```text
+G05 -> CPU
+G09 -> CUDA
+G27 -> GPU
+G28 -> CPU
+G21 -> binding OFF
+G30 -> protected comparison, binding OFF
+```
+
+Among configurations that pass all guards, selection prefers:
+
+```text
+1. Number of repaired target cases among G07 / G08 / G10
+2. Strict score
+3. Semantic-content score
+4. Tracked direct score
+```
+
+Outputs:
+
+```text
+results/selective_repair_threshold_sweep_v01111/threshold_sweep.csv
+results/selective_repair_threshold_sweep_v01111/threshold_sweep_detail.csv
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v0.11.11
+git pull origin v0.11.11
+
+python run_selective_repair_threshold_sweep_v01111.py
+```
+
+The script prints all 27 configurations and a final best configuration.
+
