@@ -9562,3 +9562,86 @@ results/cuda_only_safe_override_v1005/evaluation.log
 
 This branch is intentionally narrow: LLM repair is not overridden because v1.0.4 showed mixed correct and incorrect LLM repairs.
 
+### v1.0.6: LLM Semantic Recognition Repair
+
+v1.0.5 solved the held-out CUDA set with a narrow safe override. The next bottleneck was LLM recognition, where held-out accuracy remained 0/5 and broad repair overrides were unsafe.
+
+v1.0.6 adds a separate lightweight **LLM semantic detector** trained on new paraphrases that are distinct from the five held-out LLM prompts.
+
+Training data:
+
+```text
+30 LLM-positive prompts
+30 non-LLM negative prompts
+
+Negative coverage:
+GPU / CPU / Transformer / CUDA / Python
++ conversational controls
+```
+
+Architecture:
+
+```text
+Frozen base model final hidden state (256)
+        ↓
+MLP 256 -> 32 -> 1
+        ↓
+LLM probability
+```
+
+The detector threshold is selected on a held-back validation split with a preference for zero false positives.
+
+Runtime order:
+
+```text
+1. Existing v0.11.17 technical pipeline
+2. CUDA-only safe override from v1.0.5
+3. LLM detector
+4. If LLM detector fires, guide:
+   "LLMは文章を学習して生成する言語モデルです。"
+5. Conversational repair remains a later fallback in integrated evaluation
+```
+
+CUDA decisions take precedence over the LLM detector.
+
+New files:
+
+```text
+train_llm_semantic_detector_v1006.py
+evaluate_llm_semantic_repair_v1006.py
+run_llm_semantic_repair_v1006.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v.1.0.6
+git pull origin v.1.0.6
+
+python run_llm_semantic_repair_v1006.py
+```
+
+The runner first trains:
+
+```text
+model/model-gpu-v1.0.6-llm-detector.pt
+```
+
+and then evaluates:
+
+```text
+Original integrated 30-case guard
+Held-out technical 30
+Held-out LLM 5
+Held-out total 60
+```
+
+Output:
+
+```text
+results/llm_semantic_repair_v1006/evaluation.log
+```
+
+The v1.0.1 held-out LLM prompts are not used as detector training examples.
+
