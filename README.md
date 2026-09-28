@@ -10860,3 +10860,61 @@ Decision rule:
     non-zero gradients + increasing parameter deltas with LR -> adaptation is active
     deltas increase but accuracy stays flat               -> late blocks are insufficient
     accuracy > 55%                                        -> continue late-block adaptation
+### v1.2.5: Trainable Late-Block Fix
+
+v1.2.4 proved that Blocks 5-6 and FinalNorm were not actually adapting: all gradient norms and parameter deltas were exactly zero across the full LR sweep.
+
+Root cause:
+
+    the clean base model was frozen with requires_grad=False
+    deepcopy() preserved requires_grad=False in Block5, Block6 and FinalNorm
+
+v1.2.5 explicitly re-enables gradients after copying the late layers:
+
+    Block5    : requires_grad=True
+    Block6    : requires_grad=True
+    FinalNorm : requires_grad=True
+
+The experiment then repeats the same LR sweep and diagnostics as v1.2.4:
+
+    1e-5
+    3e-5
+    1e-4
+    3e-4
+
+Measured signals:
+
+    family-held-out CV accuracy
+    hidden drift
+    Block5 relative parameter delta
+    Block6 relative parameter delta
+    FinalNorm relative parameter delta
+    Block5 gradient norm
+    Block6 gradient norm
+    FinalNorm gradient norm
+
+New files:
+
+    trainable_late_block_fix_v125.py
+    run_trainable_late_block_fix_v125.py
+
+Run:
+
+    git fetch origin
+    git checkout v1.2.5
+    git pull origin v1.2.5
+    python run_trainable_late_block_fix_v125.py
+
+Outputs:
+
+    results/trainable_late_block_fix_v125/diagnostic.log
+    results/trainable_late_block_fix_v125/summary.csv
+    results/trainable_late_block_fix_v125/lr_*_diagnostics.csv
+    results/trainable_late_block_fix_v125/lr_*_cv_confusion.csv
+
+Primary success condition:
+
+    gradient norms > 0
+    parameter deltas > 0
+
+Accuracy is then compared against the v1.2.2 frozen-base reference of 55.0%.
