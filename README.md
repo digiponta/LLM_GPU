@@ -11111,3 +11111,70 @@ Reference:
     v1.2.7 Block1 Linear : 60.7%
 
 Important: threshold selection is development tuning on the same 300-prompt dataset. A future untouched Fresh-v3 set is required for unbiased final validation.
+### v1.2.9: GPU Semantic Failure Analysis
+
+v1.2.8 showed that a Block4 GPU-vs-NonGPU specialist did not provide a reliable gating signal. The mean GPU specialist score was only slightly higher on GPU prompts than on non-GPU prompts, and every threshold reduced overall accuracy.
+
+v1.2.9 therefore stops adding routing policy and analyzes where the GPU concept is failing.
+
+Analysis 1: multiclass GPU failure modes by layer
+
+    Block1
+    Block2
+    Block3
+    Block4
+    Block5
+    Block6
+    FinalNorm
+
+For each layer, a 6-class Linear probe is evaluated with 5-fold family-held-out CV. GPU prompts are then broken down by predicted class:
+
+    GPU -> GPU
+    GPU -> CPU
+    GPU -> LLM
+    GPU -> Transformer
+    GPU -> CUDA
+    GPU -> Python
+
+Analysis 2: GPU family failure modes
+
+The 50 GPU prompts are broken down by their five semantic families so that each family can be traced to its dominant confusion class at each layer.
+
+Analysis 3: GPU pairwise separability
+
+Pairwise Linear probes measure:
+
+    GPU vs CPU
+    GPU vs LLM
+    GPU vs Transformer
+    GPU vs CUDA
+    GPU vs Python
+
+for every layer using the same family-held-out principle.
+
+New files:
+
+    gpu_semantic_failure_analysis_v129.py
+    run_gpu_semantic_failure_analysis_v129.py
+
+Run:
+
+    git fetch origin
+    git checkout v1.2.9
+    git pull origin v1.2.9
+    python run_gpu_semantic_failure_analysis_v129.py
+
+Outputs:
+
+    results/gpu_semantic_failure_analysis_v129/analysis.log
+    results/gpu_semantic_failure_analysis_v129/gpu_multiclass_by_layer.csv
+    results/gpu_semantic_failure_analysis_v129/gpu_family_failure_modes.csv
+    results/gpu_semantic_failure_analysis_v129/gpu_pairwise_separability.csv
+    results/gpu_semantic_failure_analysis_v129/gpu_pairwise_best_stage.csv
+
+Interpretation:
+
+    low pairwise accuracy -> true semantic boundary problem
+    high pairwise accuracy + poor 6-class GPU recall -> pairwise information exists but no stable multiclass GPU region
+
+The purpose of v1.2.9 is diagnostic only; it does not deploy a new routing policy.
