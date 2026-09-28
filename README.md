@@ -10918,3 +10918,64 @@ Primary success condition:
     parameter deltas > 0
 
 Accuracy is then compared against the v1.2.2 frozen-base reference of 55.0%.
+### v1.2.6: Layer-wise Semantic Separability Diagnostic
+
+v1.2.5 confirmed that late-block adaptation was genuinely active, but even the best LR reached only 54.7% family-held-out CV, below the 55.0% frozen-base reference.
+
+v1.2.6 therefore measures semantic separability at every representation stage of the clean base model:
+
+    Embedding
+    Block1
+    Block2
+    Block3
+    Block4
+    Block5
+    Block6
+    FinalNorm
+
+For each stage, the final-token hidden vector is extracted from the completely frozen base model and evaluated with the same Linear 256 -> 6 probe under 5-fold family-held-out CV.
+
+Dataset:
+
+    300 prompts
+    6 classes
+    5 semantic families/class
+
+Classes:
+
+    GPU
+    CPU
+    LLM
+    Transformer
+    CUDA
+    Python
+
+Outputs include per-stage overall accuracy, macro recall, per-class recall, and confusion matrices.
+
+New files:
+
+    layerwise_semantic_separability_v126.py
+    run_layerwise_semantic_separability_v126.py
+
+Run:
+
+    git fetch origin
+    git checkout v1.2.6
+    git pull origin v1.2.6
+    python run_layerwise_semantic_separability_v126.py
+
+Outputs:
+
+    results/layerwise_semantic_separability_v126/diagnostic.log
+    results/layerwise_semantic_separability_v126/summary.csv
+    results/layerwise_semantic_separability_v126/*_confusion.csv
+
+Interpretation:
+
+    earlier layer clearly better than Block6/FinalNorm -> later processing erases separability
+    all layers weak for GPU/CPU                     -> base representation learning is the bottleneck
+
+References:
+
+    v1.2.2 frozen final representation : 55.0%
+    v1.2.5 adapted late-block best     : 54.7%
