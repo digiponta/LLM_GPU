@@ -10804,3 +10804,59 @@ Reference:
     v1.2.2 best family-CV : 55.0%
 
 The main decision is whether adapting Blocks 5-6 materially improves unseen-family recognition while keeping hidden-state drift small.
+### v1.2.4: Late-Block Adaptation Diagnostic + LR Sweep
+
+v1.2.3 produced 53.0% family-held-out CV for every preservation weight and reported hidden drift as 0.000000. v1.2.4 checks whether adaptation is actually occurring before changing architecture again.
+
+Base LR sweep:
+
+    1e-5
+    3e-5
+    1e-4
+    3e-4
+
+Fixed settings:
+
+    Blocks 5-6 + FinalNorm : trainable
+    Embedding + Blocks 1-4 : frozen/cached
+    Projection + Router LR : 8e-4
+    Loss                   : CE + 0.10*SupCon + 0.10*preservation
+    Evaluation             : 5-fold family-held-out CV
+
+For every fold/seed, the diagnostic records:
+
+    Block5 relative parameter delta
+    Block6 relative parameter delta
+    FinalNorm relative parameter delta
+    Block5 average gradient norm
+    Block6 average gradient norm
+    FinalNorm average gradient norm
+    hidden drift = mean(1 - cosine(adapted, original))
+    family-held-out accuracy
+
+Hidden drift and parameter deltas are printed with high precision so that very small adaptation is not rounded to zero.
+
+New files:
+
+    late_block_adaptation_diagnostic_v124.py
+    run_late_block_adaptation_diagnostic_v124.py
+
+Run:
+
+    git fetch origin
+    git checkout v1.2.4
+    git pull origin v1.2.4
+    python run_late_block_adaptation_diagnostic_v124.py
+
+Outputs:
+
+    results/late_block_adaptation_diagnostic_v124/diagnostic.log
+    results/late_block_adaptation_diagnostic_v124/summary.csv
+    results/late_block_adaptation_diagnostic_v124/lr_*_diagnostics.csv
+    results/late_block_adaptation_diagnostic_v124/lr_*_cv_confusion.csv
+
+Decision rule:
+
+    non-zero gradients + increasing parameter deltas with LR -> adaptation is active
+    deltas increase but accuracy stays flat               -> late blocks are insufficient
+    accuracy > 55%                                        -> continue late-block adaptation
