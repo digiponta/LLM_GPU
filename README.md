@@ -7948,9 +7948,9 @@ The v0.8 backbone and intent head remain frozen. The adapter is trained only on 
 Technical gate:
 
 ```text
-max technical-intent probability >= 0.50
+exactly one technical-intent probability >= 0.50
     -> first-token binding ON
-otherwise
+zero or multiple technical intents >= 0.50
     -> binding OFF, base generation unchanged
 ```
 
