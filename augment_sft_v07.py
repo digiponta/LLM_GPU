@@ -1151,3 +1151,50 @@ def augment_pairs(
 def intent_vocabulary(rows: Iterable[LabeledPair]) -> List[str]:
     labels = sorted({label for _, _, tags in rows for label in tags})
     return labels
+
+# v0.11.1 CPU-GPU directional relational binding.
+# These rows teach role direction rather than only independent attributes.
+# The fixed G05 benchmark prompt is intentionally not copied.
+CPU_GPU_RELATIONAL_ROWS: Sequence[Tuple[str, str, str]] = [
+    (
+        "コンピュータ全体の汎用的な制御を担当し、GPUへ計算処理を割り当てる側は何ですか。",
+        "CPUです。CPUは汎用処理や制御を担当し、GPUへ計算処理を割り当てます。",
+        "cpu_controls_gpu",
+    ),
+    (
+        "GPUへ実行する計算を指示する中心的なプロセッサは何ですか。",
+        "CPUです。CPUがGPUへ計算処理を指示し、GPUはその処理を実行します。",
+        "cpu_assigns_work_gpu",
+    ),
+    (
+        "汎用命令を処理しながら、並列計算をGPUへ任せる側はCPUとGPUのどちらですか。",
+        "CPUです。CPUは汎用命令を処理し、並列計算をGPUへ割り当てます。",
+        "cpu_assigns_work_gpu",
+    ),
+    (
+        "システム制御の中心となり、GPUを補助的な並列演算装置として使う側は何ですか。",
+        "CPUです。CPUはシステム制御を担当し、GPUを並列計算に利用します。",
+        "cpu_controls_gpu",
+    ),
+    (
+        "CPUから割り当てられた並列計算を実行する側は何ですか。",
+        "GPUです。GPUはCPUから割り当てられた並列計算を実行します。",
+        "gpu_executes_for_cpu",
+    ),
+    (
+        "CPUの指示を受けて大量の同種計算を並列実行する装置は何ですか。",
+        "GPUです。GPUはCPUから指示された並列計算を実行します。",
+        "gpu_controlled_by_cpu",
+    ),
+    (
+        "コンピュータ全体を汎用的に制御するのではなく、CPUと協調して並列演算を担当する装置は何ですか。",
+        "GPUです。GPUはCPUと協調し、並列演算を担当します。",
+        "gpu_executes_for_cpu",
+    ),
+    (
+        "CPUの代わりに全体制御をするのではなく、CPUから仕事を割り当てられる演算装置は何ですか。",
+        "GPUです。GPUはCPUから計算処理を割り当てられる演算装置です。",
+        "gpu_controlled_by_cpu",
+    ),
+]
+
