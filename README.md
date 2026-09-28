@@ -9782,3 +9782,90 @@ results/llm_threshold_safety_sweep_v1008/threshold_sweep.csv
 
 The expected candidate from v1.0.7 observations is near 0.60, but v1.0.8 selects from measured results rather than assuming it.
 
+### v1.0.9: Python Semantic Recognition Repair
+
+v1.0.8 fixed the LLM detector threshold at 0.70 with zero observed false LLM overrides while preserving:
+
+```text
+Original integrated : 30/30
+Held-out LLM        : 2/5
+Held-out CUDA       : 5/5
+```
+
+The next weakest technical class was Python at 1/5.
+
+v1.0.9 adds a separate Python semantic detector trained on new paraphrases that do not reuse the five held-out Python prompts.
+
+Architecture:
+
+```text
+Frozen base hidden state (256)
+        ↓
+MLP 256 -> 32 -> 1
+        ↓
+Python probability
+```
+
+Training data covers Python-positive paraphrases and negatives from:
+
+```text
+LLM
+CUDA
+CPU / GPU
+Transformer
+other programming languages
+generic programming questions
+conversation / general QA
+```
+
+Runtime priority:
+
+```text
+1. Existing technical pipeline
+2. CUDA-only safe override
+3. LLM detector at fixed threshold 0.70
+4. Python detector
+5. Conversational fallback
+```
+
+CUDA and LLM decisions take precedence over Python.
+
+New files:
+
+```text
+train_python_semantic_detector_v1009.py
+evaluate_python_semantic_repair_v1009.py
+run_python_semantic_repair_v1009.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v.1.0.9
+git pull origin v.1.0.9
+
+python run_python_semantic_repair_v1009.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v1.0.9-python-detector.pt
+```
+
+Output:
+
+```text
+results/python_semantic_repair_v1009/evaluation.log
+```
+
+Primary acceptance target:
+
+```text
+Original integrated = 30/30
+Held-out Python > 1/5
+Held-out CUDA = 5/5
+Python false positives = 0
+```
+
