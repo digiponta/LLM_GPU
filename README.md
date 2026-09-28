@@ -8298,3 +8298,49 @@ Logs are written under:
 results/cpu_gpu_direct_margin_sweep_v0114/
 ```
 
+### v0.11.5: First-Token Competitor Diagnostic
+
+v0.11.4 showed that G05 can be moved from a CPU-GPU gap of -3.099 to nearly neutral, but the generated answer changed to `DPU...` rather than `CPU...`. This indicates that the real decision is not only CPU versus GPU; CPU must win against the full vocabulary.
+
+v0.11.5 adds a diagnostic only. No training is performed.
+
+It inspects G05 using the strongest near-neutral v0.11.4 checkpoint:
+
+```text
+model/model-gpu-v0.11.4-d16_lr2e3_m15.pt
+```
+
+The diagnostic prints:
+
+```text
+- CPU/GPU intent probabilities
+- controller/executor probabilities
+- whether direct binding is active
+- signed binding delta
+- tokenization of CPU, GPU, and DPU
+- base first-token top 20 logits
+- after-binding first-token top 20 logits
+- exact rank/logit of CPU, GPU, and the first DPU token
+- winner before and after binding
+- CPU-versus-winner final logit gap
+```
+
+New files:
+
+```text
+diagnose_first_token_competitors_v0115.py
+run_first_token_competitor_diagnostic_v0115.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v0.11.5
+git pull origin v0.11.5
+
+python run_first_token_competitor_diagnostic_v0115.py
+```
+
+The next correction should be based on the actual top competing token rather than increasing CPU-GPU correction strength blindly.
+
