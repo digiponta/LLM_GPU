@@ -8501,3 +8501,88 @@ G28 -> CPU
 initial boost ~= 0.20
 ```
 
+### v0.11.8: Multi-Concept Safe Hardest-Competitor Binding
+
+v0.11.7 fixed the CPU/GPU binding problem while preserving CUDA safety. v0.11.8 generalizes the same first-token hardest-competitor mechanism to six technical concepts:
+
+```text
+tech_gpu         -> GPU
+tech_cpu         -> CPU
+tech_llm         -> LLM
+tech_transformer -> Transformer
+tech_cuda        -> CUDA
+tech_python      -> Python
+```
+
+The adapter is conditioned on:
+
+```text
+frozen intent probabilities
++
+frozen controller/executor probabilities
++
+target concept one-hot
+```
+
+and learns a non-negative boost for the selected concept's first token.
+
+Training objective:
+
+```text
+target first-token logit + boost
+    >= max(all other vocabulary logits) + 0.5
+```
+
+The boost still starts near 0.20.
+
+#### Safety gate
+
+CPU/GPU keep the v0.11.7 relative intent + role gate.
+
+For LLM / Transformer / CUDA / Python, binding is allowed only when:
+
+```text
+1. that concept is the highest technical intent,
+2. its probability is at least 0.70,
+3. the canonical answer name is not already present in the prompt.
+```
+
+The third condition protects comparison/relation prompts such as:
+
+```text
+LLMとTransformerは同じ意味ですか。
+```
+
+from being forced to start with one of the compared entity names.
+
+This conservative gate is intended to fix high-confidence missing-entity cases such as CUDA while avoiding new cross-concept regressions.
+
+New files:
+
+```text
+multi_concept_safe_binding_v0118.py
+train_multi_concept_safe_binding_v0118.py
+evaluate_multi_concept_safe_binding_v0118.py
+run_multi_concept_safe_binding_v0118.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v0.11.8
+git pull origin v0.11.8
+
+python run_multi_concept_safe_binding_v0118.py
+```
+
+Primary checks:
+
+```text
+G05 -> CPU
+G09 -> CUDA if high-confidence tech_cuda
+G27 -> GPU
+G28 -> CPU
+G30 comparison remains protected
+```
+
