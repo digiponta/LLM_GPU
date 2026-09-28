@@ -11387,3 +11387,70 @@ Outputs:
     results/family_invariant_gpu_cpu_v132/summary.csv
 
 If leave-pair-out remains low despite the family-invariant objective, the next hypothesis is that frozen Block1 does not contain enough transferable GPU/CPU structure and semantic supervision must reach base-model representation learning.
+### v1.3.3: Semantic-Supervised Base Representation Training
+
+v1.3.2 showed that an adapter on top of frozen Block1 representations reduced leave-pair-out GPU/CPU generalization from 39.0% to 30.6%. v1.3.3 therefore moves semantic supervision into base representation formation.
+
+Trainable components:
+
+    Token embedding
+    Positional embedding (if enabled)
+    Block1
+    Block2
+
+Frozen components:
+
+    Blocks3-6
+    FinalNorm
+    LM Head
+
+Training objective:
+
+    LM next-token loss
+    + 0.35 * GPU/CPU semantic classification loss
+    + 0.10 * family-invariance anchor loss
+
+The LM objective is evaluated through the complete model, so gradients flow through the frozen later blocks into Block2, Block1, and the embeddings while the later parameters themselves remain unchanged.
+
+Evaluation 1: exact 25-pair leave-target-pair-out matrix
+
+    For every GPU-family x CPU-family target pair, that pair is removed before semantic/base training.
+    A fresh Linear GPU-vs-CPU probe is then trained on the seen adapted Block1 features and tested on the unseen target pair.
+
+Evaluation 2: standard 5-fold semantic-family holdout
+
+    GPU-vs-CPU pairwise Linear probe
+    6-class Linear routing probe
+
+References:
+
+    v1.3.1 leave-pair-out mean : 39.0%
+    v1.2.9 GPU-vs-CPU pairwise : 57.0%
+    v1.2.7 Block1 6-class      : 60.7%
+
+Initial targets:
+
+    leave-pair-out mean >= 55-60%
+    GPU-vs-CPU pairwise >= 70%
+    6-class >= 58-60%
+
+New files:
+
+    semantic_supervised_base_training_v133.py
+    run_semantic_supervised_base_training_v133.py
+
+Run:
+
+    git fetch origin
+    git checkout v1.3.3
+    git pull origin v1.3.3
+    python run_semantic_supervised_base_training_v133.py
+
+Outputs:
+
+    results/semantic_supervised_base_v133/training.log
+    results/semantic_supervised_base_v133/leave_pair_out_accuracy.csv
+    results/semantic_supervised_base_v133/six_class_confusion.csv
+    results/semantic_supervised_base_v133/summary.csv
+
+Fresh-v2 is already development data. Final validation still requires an untouched Fresh-v3 set.
