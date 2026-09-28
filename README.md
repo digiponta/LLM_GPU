@@ -11178,3 +11178,74 @@ Interpretation:
     high pairwise accuracy + poor 6-class GPU recall -> pairwise information exists but no stable multiclass GPU region
 
 The purpose of v1.2.9 is diagnostic only; it does not deploy a new routing policy.
+### v1.3.0: GPU-CPU Semantic Boundary Training
+
+v1.2.9 identified GPU-vs-CPU as the weakest GPU semantic boundary. Best pairwise family-held-out accuracy was only 57.0%, while GPU-vs-CUDA reached 96.0% and GPU-vs-LLM/Transformer were around 80%.
+
+v1.3.0 therefore trains the Block1 representation directly for the GPU-vs-CPU boundary instead of adding another routing policy.
+
+Adapted component:
+
+    Block1
+
+Frozen components:
+
+    Embedding
+    Blocks 2-6
+    FinalNorm
+    LM head
+
+Boundary training data:
+
+    GPU + CPU samples from the 300-prompt semantic dataset
+    fold training uses only the four seen semantic families
+    the fifth GPU family and fifth CPU family remain held out
+
+Loss:
+
+    Binary CrossEntropy
+    + 0.25 * supervised contrastive loss
+    + 0.10 * Block1 representation preservation loss
+
+Block1 LR sweep:
+
+    1e-5
+    3e-5
+    1e-4
+
+Evaluation has two stages for every fold:
+
+    1. Direct GPU-vs-CPU binary accuracy on held-out GPU/CPU families
+    2. A fresh 6-class Linear probe trained on the adapted Block1 features
+
+This distinguishes a true improvement to the GPU-CPU semantic boundary from a narrow binary fix that damages broader semantic routing.
+
+New files:
+
+    gpu_cpu_boundary_training_v130.py
+    run_gpu_cpu_boundary_training_v130.py
+
+Run:
+
+    git fetch origin
+    git checkout v1.3.0
+    git pull origin v1.3.0
+    python run_gpu_cpu_boundary_training_v130.py
+
+Outputs:
+
+    results/gpu_cpu_boundary_training_v130/boundary.log
+    results/gpu_cpu_boundary_training_v130/summary.csv
+    results/gpu_cpu_boundary_training_v130/lr_*_six_class_confusion.csv
+
+References:
+
+    v1.2.9 GPU-vs-CPU pairwise : 57.0%
+    v1.2.7 Block1 6-class      : 60.7%
+
+Target:
+
+    raise GPU-vs-CPU held-out accuracy toward 75-80%
+    while retaining useful 6-class family-held-out performance
+
+Fresh-v2 is already a development set. Final validation still requires a future untouched Fresh-v3 set.
