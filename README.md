@@ -7855,3 +7855,75 @@ G05 removes 多数 but remains GPU-like
      separate contributing factors.
 ```
 
+### v0.10.9: Clean Intent Diagnostic
+
+v0.10.8 rebuilt v0.8 from pretraining without exposure to the lexical cue
+`多数`. The old phrase disappeared from G05, but the answer still selected
+GPU semantics for a CPU reverse-identification prompt.
+
+v0.10.9 performs no training. It diagnoses whether the rebuilt clean v0.8
+intent representation already knows that G05 is CPU/general-purpose.
+
+Inputs:
+
+```text
+model/model-gpu-v0.8-chat-clean.pt
+model/model-gpu-v0.8-intent-head-clean.pt
+```
+
+The experiment has two parts:
+
+```text
+1. Full 30-case multi-label intent diagnosis
+2. Focused G05 CPU/GPU probability diagnosis
+```
+
+The focused G05 report prints:
+
+```text
+tech_cpu
+tech_gpu
+CPU-GPU margin
+property_general
+property_parallel
+general-parallel margin
+generated answer
+```
+
+Interpretation:
+
+```text
+tech_cpu > tech_gpu
+AND property_general > property_parallel
+BUT generation is GPU-like
+    -> representation is correct;
+       representation-to-generation binding is the bottleneck.
+
+tech_gpu >= tech_cpu
+    -> reverse-identification is still a representation/training problem.
+```
+
+New files:
+
+```text
+diagnose_clean_g05_intent_v0109.py
+run_clean_intent_diagnostic_v0109.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v0.10.9
+git pull origin v0.10.9
+
+python run_clean_intent_diagnostic_v0109.py
+```
+
+Outputs:
+
+```text
+results/clean_intent_diagnostic_v0109/intent_full.log
+results/clean_intent_diagnostic_v0109/g05_focus.log
+```
+
