@@ -8813,3 +8813,64 @@ python run_selective_repair_threshold_sweep_v01111.py
 
 The script prints all 27 configurations and a final best configuration.
 
+### v0.11.12: LLM-specific Scope Rescue
+
+v0.11.11 established the best general thresholds:
+
+```text
+repair_margin_threshold      = 0.20
+scope_threshold              = 0.50
+binding_confidence_threshold = 0.45
+```
+
+These settings fixed G08 and G10 while preserving all mandatory safety guards, leaving G07 LLM as the main technical binding failure.
+
+v0.11.12 keeps the v0.11.11 thresholds fixed and adds one narrow LLM-specific rescue rule.
+
+The rescue activates only when:
+
+```text
+raw top          == tech_llm
+repair top       == tech_llm
+raw top-second margin <= 0.20
+chosen confidence >= 0.70
+canonical "LLM" not already present in the prompt
+```
+
+The raw-margin requirement is a safety constraint. It allows G07, whose LLM raw margin is small, while excluding unrelated prompts such as topic/compare cases whose raw LLM margin is much larger.
+
+Normal technical scope remains unchanged for all other concepts.
+
+New files:
+
+```text
+evaluate_llm_scope_rescue_v01112.py
+run_llm_scope_rescue_v01112.py
+```
+
+No retraining is required.
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v0.11.12
+git pull origin v0.11.12
+
+python run_llm_scope_rescue_v01112.py
+```
+
+Primary checks:
+
+```text
+G05 -> CPU
+G07 -> LLM with rescue=YES
+G08 -> Transformer
+G09 -> CUDA
+G10 -> Python
+G21 -> binding OFF
+G27 -> GPU
+G28 -> CPU
+G30 -> binding OFF / comparison protected
+```
+
