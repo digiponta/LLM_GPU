@@ -11454,3 +11454,65 @@ Outputs:
     results/semantic_supervised_base_v133/summary.csv
 
 Fresh-v2 is already development data. Final validation still requires an untouched Fresh-v3 set.
+### v1.3.4: Semantic Dataset Redesign Diagnostic
+
+v1.3.3 showed that moving semantic supervision into Embedding/Block1/Block2 still did not improve GPU-vs-CPU cross-family generalization. v1.3.4 therefore tests the dataset ontology itself before changing the model again.
+
+Problem identified in the previous dataset:
+
+    GPU families mixed workload, application, performance behavior, and CPU contrast.
+    CPU families mixed control role, instruction behavior, general-purpose usage, sequential behavior, and GPU contrast.
+
+Those family sets were not aligned semantic axes, so holding out one family per class also changed the semantic dimension being tested.
+
+v1.3.4 adds an aligned GPU/CPU dataset with the same five axes on both classes:
+
+    definition
+    architecture
+    workload
+    comparison
+    application
+
+Each class has 10 prompts per axis:
+
+    2 classes x 5 axes x 10 prompts = 100 prompts
+
+Base model weights remain completely frozen. The diagnostic uses the Block1 final-token hidden representation and a Linear 256 -> 2 probe.
+
+Evaluations:
+
+    1. Old dataset paired-index leave-family-out baseline
+    2. Redesigned within-axis 5-fold CV
+    3. Redesigned leave-one-axis-out
+    4. Redesigned mixed-axis stratified 5-fold CV
+
+Interpretation:
+
+    redesigned leave-axis-out >> old leave-family-out
+        -> ontology mismatch was a major source of apparent generalization failure
+
+    high within-axis / mixed-axis but low leave-axis-out
+        -> Block1 still depends on semantic-axis-specific cues rather than a shared GPU-vs-CPU abstraction
+
+New files:
+
+    semantic_gpu_cpu_aligned_v134.py
+    semantic_dataset_redesign_diagnostic_v134.py
+    run_semantic_dataset_redesign_diagnostic_v134.py
+
+Run:
+
+    git fetch origin
+    git checkout v1.3.4
+    git pull origin v1.3.4
+    python run_semantic_dataset_redesign_diagnostic_v134.py
+
+Outputs:
+
+    results/semantic_dataset_redesign_v134/diagnostic.log
+    results/semantic_dataset_redesign_v134/comparison.csv
+    results/semantic_dataset_redesign_v134/old_leave_family_out.csv
+    results/semantic_dataset_redesign_v134/redesigned_within_axis.csv
+    results/semantic_dataset_redesign_v134/redesigned_leave_axis_out.csv
+
+This experiment intentionally changes only the semantic ontology/evaluation dataset, not the base model or routing policy.
