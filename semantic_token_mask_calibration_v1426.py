@@ -43,6 +43,20 @@ def mean_std(xs):
     return statistics.mean(xs), statistics.stdev(xs)
 
 
+def pearson_corr(xs, ys):
+    if len(xs) != len(ys) or len(xs) < 2:
+        return 0.0
+    mx = statistics.mean(xs)
+    my = statistics.mean(ys)
+    dx = [x - mx for x in xs]
+    dy = [y - my for y in ys]
+    den_x = sum(v * v for v in dx) ** 0.5
+    den_y = sum(v * v for v in dy) ** 0.5
+    if den_x <= 1e-12 or den_y <= 1e-12:
+        return 0.0
+    return sum(a * b for a, b in zip(dx, dy)) / (den_x * den_y)
+
+
 def threshold_pool(states, score, threshold):
     mask = score >= threshold
     if not bool(mask.any()):
@@ -421,6 +435,70 @@ def main():
         ])
         w.writerows(pr_rows)
 
+    # Correlation analysis across threshold operating points.
+    threshold_acc = [row[-1] for row in pr_rows]
+    threshold_sel_precision = [row[1] for row in pr_rows]
+    threshold_sel_recall = [row[2] for row in pr_rows]
+    threshold_sel_f1 = [row[3] for row in pr_rows]
+    threshold_sel_fp = [row[5] for row in pr_rows]
+    threshold_neg_precision = [row[6] for row in pr_rows]
+    threshold_neg_recall = [row[7] for row in pr_rows]
+    threshold_neg_f1 = [row[8] for row in pr_rows]
+    threshold_neg_fp = [row[10] for row in pr_rows]
+
+    corr_rows = [
+        ("threshold_mean", "selected_precision", pearson_corr(threshold_acc, threshold_sel_precision)),
+        ("threshold_mean", "selected_recall", pearson_corr(threshold_acc, threshold_sel_recall)),
+        ("threshold_mean", "selected_f1", pearson_corr(threshold_acc, threshold_sel_f1)),
+        ("threshold_mean", "selected_false_positive_count", pearson_corr(threshold_acc, threshold_sel_fp)),
+        ("threshold_mean", "negated_precision", pearson_corr(threshold_acc, threshold_neg_precision)),
+        ("threshold_mean", "negated_recall", pearson_corr(threshold_acc, threshold_neg_recall)),
+        ("threshold_mean", "negated_f1", pearson_corr(threshold_acc, threshold_neg_f1)),
+        ("threshold_mean", "negated_false_positive_count", pearson_corr(threshold_acc, threshold_neg_fp)),
+    ]
+
+    # Seed x threshold analysis gives 20*9=180 operating points.
+    flat_acc = []
+    flat_sel_precision = []
+    flat_sel_recall = []
+    flat_sel_f1 = []
+    flat_sel_fp = []
+    flat_neg_precision = []
+    flat_neg_recall = []
+    flat_neg_f1 = []
+    flat_neg_fp = []
+
+    for ti, t in enumerate(THRESHOLDS):
+        name = f"thr_{int(t*10):02d}"
+        for si in range(len(seeds)):
+            flat_acc.append(per_setting[name][si])
+            flat_sel_precision.append(per_metric[t]["sel_precision"][si])
+            flat_sel_recall.append(per_metric[t]["sel_recall"][si])
+            flat_sel_f1.append(per_metric[t]["sel_f1"][si])
+            flat_sel_fp.append(per_metric[t]["sel_fp"][si])
+            flat_neg_precision.append(per_metric[t]["neg_precision"][si])
+            flat_neg_recall.append(per_metric[t]["neg_recall"][si])
+            flat_neg_f1.append(per_metric[t]["neg_f1"][si])
+            flat_neg_fp.append(per_metric[t]["neg_fp"][si])
+
+    corr_rows.extend([
+        ("seed_x_threshold", "selected_precision", pearson_corr(flat_acc, flat_sel_precision)),
+        ("seed_x_threshold", "selected_recall", pearson_corr(flat_acc, flat_sel_recall)),
+        ("seed_x_threshold", "selected_f1", pearson_corr(flat_acc, flat_sel_f1)),
+        ("seed_x_threshold", "selected_false_positive_count", pearson_corr(flat_acc, flat_sel_fp)),
+        ("seed_x_threshold", "negated_precision", pearson_corr(flat_acc, flat_neg_precision)),
+        ("seed_x_threshold", "negated_recall", pearson_corr(flat_acc, flat_neg_recall)),
+        ("seed_x_threshold", "negated_f1", pearson_corr(flat_acc, flat_neg_f1)),
+        ("seed_x_threshold", "negated_false_positive_count", pearson_corr(flat_acc, flat_neg_fp)),
+    ])
+
+    with (out / "correlation_summary.csv").open(
+        "w", newline="", encoding="utf-8-sig"
+    ) as f:
+        w = csv.writer(f)
+        w.writerow(["scope", "metric", "pearson_r_with_routing_accuracy"])
+        w.writerows(corr_rows)
+
     best_threshold = max(
         THRESHOLDS,
         key=lambda t: mean_std(
@@ -456,6 +534,28 @@ def main():
     print(f"Full oracle                    : {om:.1%} ± {os:.1%}")
     print(f"Best gain vs mass-80           : {best_mean-mass_m:+.1%}")
     print(f"Best gap vs gold mask          : {best_mean-gold_m:+.1%}")
+
+    print()
+    print("Correlation with routing accuracy")
+    print("-" * 72)
+    for scope, metric, corr in corr_rows:
+        print(f"{scope:18s} {metric:36s}: r={corr:+.3f}")
+
+    print()
+    print("Hypothesis check")
+    print("----------------")
+    mean_sel_p_corr = pearson_corr(threshold_acc, threshold_sel_precision)
+    mean_sel_fp_corr = pearson_corr(threshold_acc, threshold_sel_fp)
+    if mean_sel_p_corr > 0 and mean_sel_fp_corr < 0:
+        print(
+            "Supported at threshold-mean level: routing rises with SELECTED "
+            "precision and falls as SELECTED false positives increase."
+        )
+    else:
+        print(
+            "Not cleanly supported at threshold-mean level: precision/false-positive "
+            "changes alone do not explain routing accuracy."
+        )
 
     print()
     print("Reference")
