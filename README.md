@@ -11875,3 +11875,61 @@ Interpretation:
 
     direction near 50%
         -> role direction is not linearly encoded in the frozen representation
+### v1.4.1: Token-wise Relation Direction Diagnostic
+
+v1.4.0 showed that unordered concept-pair identity is recoverable, but explicit target/contrast direction remains far below chance from a single final-token hidden vector. v1.4.1 tests whether direction information is distributed across token states rather than concentrated at the final token.
+
+Stages:
+
+    Block1
+    Block2
+    Block3
+    Block4
+    Block5
+    Block6
+    FinalNorm
+
+Pooling representations:
+
+    final_token
+    mean_all
+    max_all
+    mean_first_half
+    mean_second_half
+    mean_first_second_concat
+
+Tasks:
+
+    Direction head : 2-way
+    Pair head      : 15-way
+    Reconstructed target from predicted pair + predicted direction
+
+Reference:
+
+    v1.4.0 best final-token direction : 21.7% at Block3
+    binary chance                     : 50.0%
+
+Interpretation:
+
+    token-wise pooling > 50% direction
+        -> relation direction exists across token states but is lost by final-token compression
+
+    all pooling <= 50%
+        -> the frozen base representation lacks a stable linearly decodable target/contrast direction signal
+
+New files:
+
+    tokenwise_relation_direction_v141.py
+    run_tokenwise_relation_direction_v141.py
+
+Run:
+
+    git fetch origin
+    git checkout v1.4.1
+    git pull origin v1.4.1
+    python run_tokenwise_relation_direction_v141.py
+
+Outputs:
+
+    results/tokenwise_relation_direction_v141/diagnostic.log
+    results/tokenwise_relation_direction_v141/summary.csv
