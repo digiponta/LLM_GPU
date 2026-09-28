@@ -8133,3 +8133,107 @@ G28 -> CPU
 
 while preserving the 30-case nontechnical regression set.
 
+### v0.11.3: Direct CPU/GPU Logit Margin Binding
+
+v0.11.2 established that G05 already has the correct relative semantic direction:
+
+```text
+CPU intent > GPU intent
+controller > executor
+```
+
+but the base first-token LM prior still strongly favors GPU:
+
+```text
+G05 base CPU-GPU logit gap = -3.099
+```
+
+v0.11.3 therefore stops adding new semantic labels. It freezes the clean base model, clean intent head, and v0.11.2 role head, then learns only one signed CPU-vs-GPU logit-gap correction.
+
+Architecture:
+
+```text
+frozen clean intent probabilities
+       +
+frozen controller/executor probabilities
+       ↓
+DirectGapBinding
+       ↓
+single signed delta
+
+positive delta -> favors CPU
+negative delta -> favors GPU
+
+CPU logit += delta / 2
+GPU logit -= delta / 2
+```
+
+This changes only the CPU/GPU first-token gap. No other vocabulary logits are modified.
+
+Training objective:
+
+```text
+CPU target:
+    CPU_logit - GPU_logit >= +1.0
+
+GPU target:
+    GPU_logit - CPU_logit >= +1.0
+```
+
+The inference gate is relative rather than absolute:
+
+```text
+CPU correction ON when:
+    CPU intent > GPU intent
+    CPU-GPU intent margin >= 0.10
+    controller > executor
+    controller-executor margin >= 0.05
+
+GPU correction ON when:
+    GPU intent > CPU intent
+    GPU-CPU intent margin >= 0.10
+    executor > controller
+    executor-controller margin >= 0.05
+```
+
+This means G05 should be eligible even though its controller probability is below 0.55, while ambiguous comparison cases such as G27/G28 remain protected by the relative-margin gate.
+
+The evaluator reports:
+
+```text
+CPU/GPU intent probabilities
+controller/executor probabilities
+direct-binding ON/OFF
+base CPU-GPU logit gap
+learned signed delta
+final CPU-GPU logit gap
+```
+
+New files:
+
+```text
+cpu_gpu_direct_margin_binding_v0113.py
+train_cpu_gpu_direct_margin_binding_v0113.py
+evaluate_cpu_gpu_direct_margin_binding_v0113.py
+run_cpu_gpu_direct_margin_binding_v0113.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v0.11.3
+git pull origin v0.11.3
+
+python run_cpu_gpu_direct_margin_binding_v0113.py
+```
+
+Primary criterion:
+
+```text
+G05 final CPU-GPU gap >= +1.0
+G05 output starts with CPU
+G27 remains GPU
+G28 remains CPU
+```
+
