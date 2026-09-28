@@ -8041,3 +8041,95 @@ G05 should start with CPU, while G27 and G28 remain correct.
 
 The evaluator also prints the four learned relation probabilities for every fixed benchmark case so the effect can be inspected directly.
 
+### v0.11.2: CPU/GPU Role Binding
+
+v0.11.1 showed that four directional relation labels were too fine-grained for the current model/data scale. The relation head overfit quickly and produced high CPU-GPU relation probabilities even on unrelated prompts.
+
+v0.11.2 therefore compresses the relation structure into two roles:
+
+```text
+controller -> CPU
+executor   -> GPU
+```
+
+Conceptual structure:
+
+```text
+CPU
+  - controller
+  - general-purpose processing
+  - diverse instruction execution
+  - system coordination
+
+GPU
+  - executor / accelerator
+  - parallel computation
+  - homogeneous workloads
+  - receives work from CPU
+```
+
+Architecture:
+
+```text
+clean v0.8 hidden
+   -> frozen clean intent head
+   -> trainable 2-dim role head
+        controller / executor
+   -> [intent probabilities + role probabilities]
+   -> low-rank first-token logit binding
+```
+
+Two changes distinguish v0.11.2 from v0.11.1:
+
+1. Non-CPU/GPU negative rows train the role head toward `controller=0, executor=0`, preventing constant relation activation.
+2. Output learning uses a direct CPU-vs-GPU margin rather than full-vocabulary cross entropy:
+
+```text
+CPU target: logit(CPU) > logit(GPU) + margin
+GPU target: logit(GPU) > logit(CPU) + margin
+```
+
+The evaluator reports, for every fixed case:
+
+```text
+CPU intent probability
+GPU intent probability
+controller probability
+executor probability
+role-binding ON/OFF
+CPU-GPU logit gap before binding
+CPU-GPU bias gap
+CPU-GPU logit gap after binding
+```
+
+The exact fixed benchmark prompts are excluded from training.
+
+New files:
+
+```text
+cpu_gpu_role_binding_v0112.py
+train_cpu_gpu_role_binding_v0112.py
+evaluate_cpu_gpu_role_binding_v0112.py
+run_cpu_gpu_role_binding_v0112.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v0.11.2
+git pull origin v0.11.2
+
+python run_cpu_gpu_role_binding_v0112.py
+```
+
+Primary success criterion:
+
+```text
+G05 -> CPU
+G27 -> GPU
+G28 -> CPU
+```
+
+while preserving the 30-case nontechnical regression set.
+
