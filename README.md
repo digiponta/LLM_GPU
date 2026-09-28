@@ -11809,3 +11809,69 @@ Outputs:
 
     results/relational_semantic_representation_v139/diagnostic.log
     results/relational_semantic_representation_v139/summary.csv
+### v1.4.0: Explicit Relation-Direction Head Diagnostic
+
+v1.3.9 showed a strong asymmetry: unordered concept-pair identity was recoverable at roughly 66-75%, while ordered target/contrast accuracy stayed near zero to the low teens. v1.4.0 therefore factorizes relational semantics explicitly.
+
+At every representation stage, two independent Linear heads predict:
+
+    Unordered concept pair : 15-way
+    Direction              : 2-way
+
+Direction uses a canonical ordering of the two concepts:
+
+    0 = target is canonical first concept
+    1 = target is canonical second concept
+
+The final semantic decision is reconstructed as:
+
+    unordered pair + direction -> target concept + contrast concept
+
+Diagnostics:
+
+    pair accuracy
+    explicit direction accuracy
+    reconstructed target accuracy
+    reconstructed contrast accuracy
+    strict ordered target+contrast accuracy
+    direction accuracy conditioned on pair being correct
+    gold pair + predicted direction oracle
+    predicted pair + gold direction oracle
+
+These oracle decompositions identify whether pair identity or direction is the dominant bottleneck.
+
+Stages:
+
+    Embedding
+    Block1
+    Block2
+    Block3
+    Block4
+    Block5
+    Block6
+    FinalNorm
+
+New files:
+
+    explicit_relation_direction_v140.py
+    run_explicit_relation_direction_v140.py
+
+Run:
+
+    git fetch origin
+    git checkout v1.4.0
+    git pull origin v1.4.0
+    python run_explicit_relation_direction_v140.py
+
+Outputs:
+
+    results/explicit_relation_direction_v140/diagnostic.log
+    results/explicit_relation_direction_v140/summary.csv
+
+Interpretation:
+
+    direction > 50% with strong pair accuracy
+        -> explicit structured concept-pair + role encoding can recover relational semantics
+
+    direction near 50%
+        -> role direction is not linearly encoded in the frozen representation
