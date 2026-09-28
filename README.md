@@ -12005,3 +12005,73 @@ Outputs:
 
     results/role_position_disentanglement_v142/diagnostic.log
     results/role_position_disentanglement_v142/summary.csv
+### v1.4.3: Explicit Role Marker / Span Diagnostic
+
+v1.4.2 showed that Concept Pair and surface Position are strongly represented, while semantic Target/Contrast Role remains weak. v1.4.3 therefore factorizes the prompt into explicit semantic components instead of relying on a single whole-prompt vector.
+
+Structured inputs:
+
+    Concept span 1
+    Concept span 2
+    Natural-language relation phrase
+
+The relation phrase uses neutral positional wording such as:
+
+    first concept is intended, second concept is not
+    first concept is not intended, second concept is intended
+
+No class name or TARGET/CONTRAST label token is inserted into the model input.
+
+Feature combinations:
+
+    span1
+    span2
+    relation
+    span12
+    span1_relation
+    span2_relation
+    span12_relation
+
+Tasks:
+
+    Role 2-way
+    Pair 15-way
+    Reconstructed Target
+
+Evaluations:
+
+    mixed-order 5-fold CV
+    target-first -> contrast-first transfer
+    contrast-first -> target-first transfer
+
+Reference:
+
+    v1.4.2 best mixed Role CV       : 21.7%
+    v1.4.2 best cross-position Role : 39.2%
+    binary chance                   : 50.0%
+
+Interpretation:
+
+    span12_relation >> span12
+        -> explicit Concept + Relation factorization restores role binding
+
+    relation-only dominates
+        -> the role rule is carried mainly by the explicit relation phrase; concept pair is still needed to reconstruct the target class
+
+New files:
+
+    semantic_explicit_role_span_v143.py
+    explicit_role_span_diagnostic_v143.py
+    run_explicit_role_span_diagnostic_v143.py
+
+Run:
+
+    git fetch origin
+    git checkout v1.4.3
+    git pull origin v1.4.3
+    python run_explicit_role_span_diagnostic_v143.py
+
+Outputs:
+
+    results/explicit_role_span_v143/diagnostic.log
+    results/explicit_role_span_v143/summary.csv
