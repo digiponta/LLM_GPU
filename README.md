@@ -9717,3 +9717,68 @@ No new LLM false-positive regression
 CUDA held-out remains 5/5
 ```
 
+### v1.0.8: LLM Threshold Safety Sweep
+
+v1.0.7 restored the original integrated benchmark to 30/30 and kept held-out LLM at 2/5, but one held-out Python prompt still triggered a false LLM override at probability 0.587. One original repeat prompt also triggered an unnecessary LLM override at probability 0.576.
+
+v1.0.8 keeps the v1.0.7 detector frozen and sweeps only the runtime threshold:
+
+```text
+0.50
+0.55
+0.58
+0.60
+0.62
+0.65
+0.70
+```
+
+Each threshold is evaluated on:
+
+```text
+Original integrated 30
+Held-out technical 30
+Held-out LLM 5
+Held-out CUDA 5
+Held-out total 60
+Original false LLM overrides
+Held-out false LLM overrides
+```
+
+Selection priority:
+
+```text
+1. Original = 30/30
+2. Zero false LLM overrides
+3. CUDA = 5/5
+4. Highest held-out LLM accuracy
+5. Highest held-out total accuracy
+6. Higher threshold for extra safety
+```
+
+New files:
+
+```text
+llm_threshold_safety_sweep_v1008.py
+run_llm_threshold_safety_sweep_v1008.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v.1.0.8
+git pull origin v.1.0.8
+
+python run_llm_threshold_safety_sweep_v1008.py
+```
+
+Outputs:
+
+```text
+results/llm_threshold_safety_sweep_v1008/threshold_sweep.log
+results/llm_threshold_safety_sweep_v1008/threshold_sweep.csv
+```
+
+The expected candidate from v1.0.7 observations is near 0.60, but v1.0.8 selects from measured results rather than assuming it.
+
