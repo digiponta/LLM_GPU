@@ -8416,3 +8416,88 @@ G28 -> CPU
 
 The evaluator also prints the target boost, the base winner, the after-binding winner, and the target/winner logits for every activated case.
 
+### v0.11.7: Safe Hardest-Competitor Binding
+
+v0.11.6 successfully fixed G05 by boosting the correct CPU first token above the full vocabulary, but exposed two safety issues:
+
+```text
+1. The boost initialized at 6.0 because max_boost * sigmoid(0) = 12 * 0.5.
+2. G09 (CUDA) incorrectly activated the GPU binding because tech_gpu was high even though tech_cuda was the stronger technical intent.
+```
+
+v0.11.7 keeps the full-vocabulary hardest-competitor objective and fixes both issues.
+
+#### Near-zero boost initialization
+
+The final layer is initialized so that:
+
+```text
+initial boost ~= 0.20
+```
+
+instead of 6.0.
+
+For max_boost=12, the output bias is initialized to the inverse-sigmoid value corresponding to 0.20/12.
+
+#### Technical top-intent safety gate
+
+The six technical intent labels are ranked:
+
+```text
+tech_gpu
+tech_cpu
+tech_llm
+tech_transformer
+tech_cuda
+tech_python
+```
+
+Binding is allowed only when the top technical intent is exactly the target CPU/GPU concept.
+
+CPU correction requires:
+
+```text
+top technical intent == tech_cpu
+CPU > GPU by at least 0.10
+controller > executor by at least 0.05
+```
+
+GPU correction requires:
+
+```text
+top technical intent == tech_gpu
+GPU > CPU by at least 0.10
+executor > controller by at least 0.05
+```
+
+Therefore a CUDA prompt such as G09 should remain unmodified when `tech_cuda` is the strongest technical intent.
+
+New files:
+
+```text
+safe_hardest_competitor_binding_v0117.py
+train_safe_hardest_competitor_binding_v0117.py
+evaluate_safe_hardest_competitor_binding_v0117.py
+run_safe_hardest_competitor_binding_v0117.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v0.11.7
+git pull origin v0.11.7
+
+python run_safe_hardest_competitor_binding_v0117.py
+```
+
+Primary criteria:
+
+```text
+G05 -> CPU
+G09 -> no GPU binding
+G27 -> GPU
+G28 -> CPU
+initial boost ~= 0.20
+```
+
