@@ -10158,3 +10158,86 @@ CUDA = 5/5
 LLM second-stage false positives = 0
 ```
 
+### v1.1.1: Transformer Semantic Recognition Repair
+
+v1.1.0 improved held-out LLM from 2/5 to 4/5 while preserving the original integrated benchmark at 30/30. Transformer remained at 3/5.
+
+v1.1.1 adds a dedicated Transformer semantic detector trained on new paraphrases describing Self-Attention, Multi-Head Attention, Encoder/Decoder blocks, sequence modeling, and Attention-based architectures.
+
+Architecture:
+
+```text
+Frozen base hidden state (256)
+        ↓
+MLP 256 -> 32 -> 1
+        ↓
+Transformer probability
+```
+
+Runtime priority:
+
+```text
+1. Existing technical pipeline
+2. CUDA-only safe override
+3. Primary LLM detector at 0.70
+4. Python detector
+5. CPU/GPU hardware detector at 0.93
+6. CPU hard-case detector
+7. LLM second-stage detector
+8. Transformer semantic detector
+9. Conversational fallback
+```
+
+Transformer hard negatives include:
+
+```text
+LLM
+generic neural-network/model questions
+GPU / CPU / CUDA
+Python
+general conversation
+```
+
+New files:
+
+```text
+train_transformer_semantic_detector_v111.py
+evaluate_transformer_semantic_repair_v111.py
+run_transformer_semantic_repair_v111.py
+```
+
+Run:
+
+```powershell
+git fetch origin
+git checkout v1.1.1
+git pull origin v1.1.1
+
+python run_transformer_semantic_repair_v111.py
+```
+
+Checkpoint:
+
+```text
+model/model-gpu-v1.1.1-transformer-detector.pt
+```
+
+Output:
+
+```text
+results/transformer_semantic_repair_v111/evaluation.log
+```
+
+Primary acceptance target:
+
+```text
+Original integrated = 30/30
+Transformer > 3/5
+LLM >= 4/5
+GPU >= 4/5
+CPU >= 3/5
+Python >= 3/5
+CUDA = 5/5
+Transformer false positives = 0
+```
+
