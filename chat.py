@@ -277,9 +277,27 @@ def append_route_record(
     user_text: str,
     candidate_answer: str,
     reason: str,
-) -> None:
+) -> bool:
     path.parent.mkdir(parents=True, exist_ok=True)
+
+    fingerprint = pair_fingerprint(
+        resolution + "\n" + reason,
+        user_text,
+    )
+
+    if path.exists():
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            if not raw.strip():
+                continue
+            try:
+                old = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if old.get("fingerprint") == fingerprint:
+                return False
+
     row = {
+        "fingerprint": fingerprint,
         "resolution": resolution,
         "action": action,
         "user": user_text,
@@ -289,6 +307,7 @@ def append_route_record(
     }
     with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    return True
 
 
 def route_resolution_action(
@@ -301,29 +320,92 @@ def route_resolution_action(
 ) -> str:
     if resolution == "LEARNING_GAP":
         path = Path(args.teaching_queue)
-        append_route_record(
+        added = append_route_record(
             path, resolution, action, user_text, candidate_answer, reason
         )
-        return f"queued teaching candidate -> {path}"
+        return (
+            f"queued teaching candidate -> {path}"
+            if added else
+            f"teaching candidate already queued -> {path}"
+        )
 
     if resolution == "UNKNOWN_KNOWLEDGE":
         path = Path(args.knowledge_queue)
-        append_route_record(
+        added = append_route_record(
             path, resolution, action, user_text, candidate_answer, reason
         )
-        return f"queued knowledge request -> {path}"
+        return (
+            f"queued knowledge request -> {path}"
+            if added else
+            f"knowledge request already queued -> {path}"
+        )
 
     if resolution == "GATE_REVIEW":
         path = Path(args.gate_review_queue)
-        append_route_record(
+        added = append_route_record(
             path, resolution, action, user_text, candidate_answer, reason
         )
-        return f"queued gate review -> {path}"
+        return (
+            f"queued gate review -> {path}"
+            if added else
+            f"gate review already queued -> {path}"
+        )
 
     if resolution == "INPUT_REJECT":
         return "request rephrase"
 
     return "normal response"
+
+
+def validate_teaching_answer(
+    question: str,
+    corrected: str,
+) -> tuple[bool, str]:
+    intent, slots = classify_intent_and_slots(question)
+
+    if intent == "definition" and slots:
+        slot = slots[0]
+        if definition_is_echo_only(slot, corrected):
+            return (
+                False,
+                "definition teaching answer is only an echo; "
+                "teach category/function/property, not only a synonym",
+            )
+        if definition_is_uninformative(slot, corrected):
+            return (
+                False,
+                "definition teaching answer is uninformative; "
+                "include category, function, or distinguishing property",
+            )
+
+    concept_ok, concept_reason = answer_concept_consistency(
+        question,
+        corrected,
+    )
+    if not concept_ok:
+        return False, concept_reason
+
+    return True, "teaching answer accepted"
+
+
+def teaching_hint(question: str) -> str:
+    focus = extract_definition_focus(question)
+    if not focus:
+        return "Provide a concrete, correct answer with the key concept and function."
+
+    key = focus.lower()
+    examples = {
+        "ai": "AIは人間の知的な処理をコンピュータで実現する技術です。",
+        "人工知能": "人工知能は人間の知的な処理をコンピュータで実現する技術です。",
+        "cpu": "CPUは汎用的な命令実行と制御処理を担当する中央処理装置です。",
+        "gpu": "GPUは多数の演算を並列に処理するプロセッサです。",
+        "llm": "LLMは大量のテキストから学習し、言語を扱う大規模言語モデルです。",
+        "大規模言語モデル": "大規模言語モデルは大量のテキストから学習し、言語を扱うモデルです。",
+    }
+    return examples.get(
+        key,
+        f"{focus}について、分類・機能・特徴のいずれかを含む説明を教えてください。",
+    )
 
 
 def learning_log_count(path: Path) -> int:
@@ -1567,7 +1649,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.6.13 Automatic Action Routing")
+    print(" LLM_GPU Chat - v1.6.14 Guided Teaching + Queue Dedup")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
@@ -1750,16 +1832,24 @@ def main() -> None:
             elif last_user_text is None:
                 print("[no previous user turn to teach]")
             else:
-                append_learning_pair(
-                    learning_log,
+                teaching_ok, teaching_reason = validate_teaching_answer(
                     last_user_text,
                     corrected,
-                    source="chat-manual",
                 )
-                print(
-                    f"[manual learning pair saved; "
-                    f"pairs={learning_log_count(learning_log)}]"
-                )
+                if not teaching_ok:
+                    print(f"[teaching rejected: {teaching_reason}]")
+                    print(f"[hint: {teaching_hint(last_user_text)}]")
+                else:
+                    append_learning_pair(
+                        learning_log,
+                        last_user_text,
+                        corrected,
+                        source="chat-manual",
+                    )
+                    print(
+                        f"[manual learning pair saved; "
+                        f"pairs={learning_log_count(learning_log)}]"
+                    )
             print()
             continue
 
