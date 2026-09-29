@@ -1708,9 +1708,11 @@ def semantic_consistency_check(
 
     # Greeting turns are intentionally short and semantically broad.
     # Slot/intent matching is more reliable than history similarity here.
+    # A non-greeting answer must not pass merely because generation confidence
+    # or probe agreement is high.
     if intent == "greeting":
         return (
-            True, current_sim, -1.0, slot_reason,
+            slots_ok, current_sim, -1.0, slot_reason,
             intent, slots, slot_coverage,
         )
 
@@ -1878,7 +1880,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.6.26 Regression Baseline")
+    print(" LLM_GPU Chat - v1.6.27 Greeting-Consistency Fix")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
