@@ -1101,6 +1101,7 @@ def main() -> None:
     print("  /learn off    stop capture")
     print("  /learn status show capture state and saved-pair count")
     print("  /teach TEXT   save a corrected answer for the previous user turn")
+    print("  /good         approve and save the previous AI answer for learning")
     print("  /train        run incremental training and reload checkpoint")
     print("  /exit         quit")
     print()
@@ -1109,6 +1110,7 @@ def main() -> None:
     learning_log = Path(args.learning_log)
     learning_enabled = bool(args.learn)
     last_user_text: str | None = None
+    last_ai_reply: str | None = None
 
     while True:
         try:
@@ -1188,6 +1190,23 @@ def main() -> None:
             print()
             continue
 
+        if command == "/good":
+            if last_user_text is None or last_ai_reply is None:
+                print("[no previous AI answer to approve]")
+            else:
+                append_learning_pair(
+                    learning_log,
+                    last_user_text,
+                    last_ai_reply,
+                    source="chat-approved",
+                )
+                print(
+                    f"[approved learning pair saved; "
+                    f"pairs={learning_log_count(learning_log)}]"
+                )
+            print()
+            continue
+
         if command == "/train":
             new_model_path = run_online_training(args, model_path)
             if new_model_path is not None:
@@ -1198,6 +1217,10 @@ def main() -> None:
                 model_path = new_model_path
                 print(f"[reloaded trained checkpoint: {model_path}]")
                 load_concept_calibration(calibration_path, device)
+                history.clear()
+                last_user_text = None
+                last_ai_reply = None
+                print("[conversation history cleared after training]")
             print()
             continue
 
@@ -1347,17 +1370,11 @@ def main() -> None:
         # UNKNOWN/rejected turns are intentionally discarded.
         if accepted:
             history.append((user_text, reply))
+            last_ai_reply = reply
             if learning_enabled:
-                append_learning_pair(
-                    learning_log,
-                    user_text,
-                    reply,
-                    source="chat-auto",
-                )
-                print(
-                    f"[learning pair saved; "
-                    f"pairs={learning_log_count(learning_log)}]"
-                )
+                print("[learning candidate ready: use /good to approve or /teach TEXT to correct]")
+        else:
+            last_ai_reply = None
 
 
 if __name__ == "__main__":
