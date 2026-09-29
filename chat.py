@@ -40,7 +40,7 @@ DEFAULT_TOKENIZER = "model/tokenizer-v0.7-bpe.json"
 DEFAULT_MODEL = "model/model-gpu-v0.8-chat-clean.pt"
 DEFAULT_CONCEPT_CALIBRATION = "model/concept-calibration-v1512.pt"
 DEFAULT_LEARNING_LOG = "data/chat_history.jsonl"
-DEFAULT_ONLINE_MODEL = "model/model-gpu-v1.6.0-online.pt"
+DEFAULT_ONLINE_MODEL = "model/model-gpu-v1.6.1-online.pt"
 DEFAULT_ONLINE_TRAINER = "online_train.py"
 
 USER_PREFIX = "人: "
@@ -1014,7 +1014,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.5.12 Train-Centroid Calibrated Concept Gate")
+    print(" LLM_GPU Chat - v1.6.1 Manual Teaching + Calibrated Concept Gate")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
