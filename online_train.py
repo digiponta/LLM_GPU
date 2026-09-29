@@ -1,0 +1,302 @@
+# online_train.py
+#
+# LLM_GPU v1.6.0 incremental conversational learning.
+#
+# - Reads accepted/manual dialogue pairs saved by chat.py as JSONL.
+# - Replays the existing conversation corpus to reduce catastrophic forgetting.
+# - Computes loss only on the AI answer.
+# - Uses a low learning rate and validation/early stopping.
+# - Writes a new checkpoint; it never overwrites the base checkpoint.
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import random
+import time
+from pathlib import Path
+from typing import List, Sequence, Tuple
+
+import torch
+import torch.nn.functional as F
+from torch.utils.data import DataLoader, Dataset
+
+from model import LanguageModel
+from tokenizer_bpe import Tokenizer
+
+
+USER_PREFIX = "人: "
+AI_PREFIX = "AI: "
+SEED = 42
+
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        description="Low-LR incremental conversational training for LLM_GPU v1.6.0."
+    )
+    p.add_argument("--chat-data", default="data/chat_history.jsonl")
+    p.add_argument("--replay-data", default="data/conversation-ja.txt")
+    p.add_argument("--tokenizer", default="model/tokenizer-v0.7-bpe.json")
+    p.add_argument("--base-model", default="model/model-gpu-v0.8-chat-clean.pt")
+    p.add_argument("--output", default="model/model-gpu-v1.6.0-online.pt")
+    p.add_argument("--epochs", type=int, default=3)
+    p.add_argument("--learning-rate", type=float, default=1e-5)
+    p.add_argument("--batch-size", type=int, default=8)
+    p.add_argument("--validation-ratio", type=float, default=0.15)
+    p.add_argument("--patience", type=int, default=2)
+    p.add_argument(
+        "--replay-ratio",
+        type=float,
+        default=1.0,
+        help="Replay pairs per new chat pair. 1.0 means equal-sized replay.",
+    )
+    return p.parse_args()
+
+
+def load_chat_jsonl(path: Path) -> List[Tuple[str, str]]:
+    pairs: List[Tuple[str, str]] = []
+    if not path.exists():
+        return pairs
+    for line_no, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not raw.strip():
+            continue
+        try:
+            row = json.loads(raw)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"{path}:{line_no}: invalid JSON: {e}") from e
+        user = str(row.get("user", "")).strip()
+        answer = str(row.get("assistant", "")).strip()
+        if user and answer:
+            pairs.append((user, answer))
+    return pairs
+
+
+def load_replay_pairs(path: Path) -> List[Tuple[str, str]]:
+    if not path.exists():
+        return []
+    pairs: List[Tuple[str, str]] = []
+    pending_user: str | None = None
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith(USER_PREFIX):
+            pending_user = line[len(USER_PREFIX):].strip()
+        elif line.startswith(AI_PREFIX) and pending_user is not None:
+            answer = line[len(AI_PREFIX):].strip()
+            if pending_user and answer:
+                pairs.append((pending_user, answer))
+            pending_user = None
+    return pairs
+
+
+class ConversationDataset(Dataset):
+    def __init__(
+        self,
+        pairs: Sequence[Tuple[str, str]],
+        tokenizer: Tokenizer,
+        context_length: int,
+    ):
+        self.rows = []
+        self.pad_id = tokenizer.pad_id
+
+        for user_text, answer_text in pairs:
+            prompt_ids = tokenizer.encode(
+                f"{USER_PREFIX}{user_text}\n{AI_PREFIX}",
+                add_bos=True,
+            )
+            answer_ids = tokenizer.encode(answer_text, add_eos=True)
+            max_sequence = context_length + 1
+
+            if len(prompt_ids) + len(answer_ids) > max_sequence:
+                keep_prompt = max(1, max_sequence - len(answer_ids))
+                prompt_ids = prompt_ids[-keep_prompt:]
+
+            if len(prompt_ids) + len(answer_ids) > max_sequence:
+                room = max_sequence - len(prompt_ids)
+                answer_ids = answer_ids[:max(1, room)]
+                if answer_ids:
+                    answer_ids[-1] = tokenizer.eos_id
+
+            sequence = prompt_ids + answer_ids
+            answer_start = len(prompt_ids)
+            x = sequence[:-1]
+            y = sequence[1:]
+            mask = [
+                1.0 if (i + 1) >= answer_start else 0.0
+                for i in range(len(y))
+            ]
+
+            pad_count = context_length - len(x)
+            x += [tokenizer.pad_id] * pad_count
+            y += [tokenizer.pad_id] * pad_count
+            mask += [0.0] * pad_count
+
+            self.rows.append((
+                torch.tensor(x, dtype=torch.long),
+                torch.tensor(y, dtype=torch.long),
+                torch.tensor(mask, dtype=torch.float32),
+            ))
+
+    def __len__(self) -> int:
+        return len(self.rows)
+
+    def __getitem__(self, index: int):
+        return self.rows[index]
+
+
+def masked_loss(model, x, y, mask):
+    logits = model(x)
+    losses = F.cross_entropy(
+        logits.reshape(-1, logits.size(-1)),
+        y.reshape(-1),
+        reduction="none",
+    ).view_as(y)
+    return (losses * mask).sum() / mask.sum().clamp_min(1.0)
+
+
+@torch.no_grad()
+def evaluate(model, loader, device):
+    model.eval()
+    total = 0.0
+    count = 0
+    for x, y, mask in loader:
+        x, y, mask = x.to(device), y.to(device), mask.to(device)
+        total += float(masked_loss(model, x, y, mask).item())
+        count += 1
+    return total / max(1, count)
+
+
+def main() -> None:
+    args = parse_args()
+    random.seed(SEED)
+    torch.manual_seed(SEED)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    chat_path = Path(args.chat_data)
+    replay_path = Path(args.replay_data)
+    tokenizer_path = Path(args.tokenizer)
+    base_path = Path(args.base_model)
+    output_path = Path(args.output)
+
+    new_pairs = load_chat_jsonl(chat_path)
+    if len(new_pairs) < 2:
+        raise ValueError("At least 2 chat learning pairs are required.")
+
+    replay = load_replay_pairs(replay_path)
+    replay_count = min(
+        len(replay),
+        max(0, int(round(len(new_pairs) * args.replay_ratio))),
+    )
+    random.shuffle(replay)
+    pairs = list(new_pairs) + replay[:replay_count]
+    random.shuffle(pairs)
+
+    tokenizer = Tokenizer.load(str(tokenizer_path))
+    model, checkpoint = LanguageModel.load_checkpoint(str(base_path), device=device)
+
+    if model.vocab_size != tokenizer.vocab_size:
+        raise ValueError(
+            f"Tokenizer/model vocabulary mismatch: "
+            f"{tokenizer.vocab_size} != {model.vocab_size}"
+        )
+
+    val_count = max(1, int(round(len(pairs) * args.validation_ratio)))
+    val_count = min(val_count, len(pairs) - 1)
+    val_pairs = pairs[:val_count]
+    train_pairs = pairs[val_count:]
+
+    train_ds = ConversationDataset(train_pairs, tokenizer, model.context_length)
+    val_ds = ConversationDataset(val_pairs, tokenizer, model.context_length)
+    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
+    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False)
+
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=args.learning_rate,
+        weight_decay=0.01,
+    )
+
+    print("=" * 72)
+    print(" LLM_GPU v1.6.0 Incremental Conversation Learning")
+    print("=" * 72)
+    print("Device          :", device)
+    if device.type == "cuda":
+        print("GPU             :", torch.cuda.get_device_name(0))
+    print("Base model      :", base_path)
+    print("Base loss       :", checkpoint.get("loss"))
+    print("New chat pairs  :", len(new_pairs))
+    print("Replay pairs    :", replay_count)
+    print("Train pairs     :", len(train_pairs))
+    print("Validation pairs:", len(val_pairs))
+    print("Learning rate   :", args.learning_rate)
+    print("Epoch limit     :", args.epochs)
+    print()
+
+    best_val = float("inf")
+    best_state = None
+    best_epoch = 0
+    bad_epochs = 0
+
+    for epoch in range(1, args.epochs + 1):
+        model.train()
+        total = 0.0
+        batches = 0
+        started = time.perf_counter()
+
+        for x, y, mask in train_loader:
+            x, y, mask = x.to(device), y.to(device), mask.to(device)
+            optimizer.zero_grad(set_to_none=True)
+            loss = masked_loss(model, x, y, mask)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+            total += float(loss.item())
+            batches += 1
+
+        train_loss = total / max(1, batches)
+        val_loss = evaluate(model, val_loader, device)
+        elapsed = time.perf_counter() - started
+        print(
+            f"epoch={epoch:02d} train={train_loss:.6f} "
+            f"val={val_loss:.6f} ppl={math.exp(min(val_loss, 20.0)):.2f} "
+            f"time={elapsed:.2f}s"
+        )
+
+        if val_loss < best_val - 1e-5:
+            best_val = val_loss
+            best_epoch = epoch
+            bad_epochs = 0
+            best_state = {
+                k: v.detach().cpu().clone()
+                for k, v in model.state_dict().items()
+            }
+        else:
+            bad_epochs += 1
+            if bad_epochs >= args.patience:
+                print("early stopping")
+                break
+
+    if best_state is None:
+        raise RuntimeError("No valid checkpoint produced.")
+
+    model.load_state_dict(best_state)
+    model.to(device)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    model.save_checkpoint(
+        str(output_path),
+        optimizer=optimizer,
+        epoch=best_epoch,
+        loss=best_val,
+    )
+
+    print()
+    print("Training completed.")
+    print("Best epoch :", best_epoch)
+    print("Best val   :", f"{best_val:.6f}")
+    print("Saved      :", output_path)
+
+
+if __name__ == "__main__":
+    main()
