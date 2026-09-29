@@ -3,7 +3,7 @@
 # Interactive chat interface for the current LLM_GPU conversational checkpoint.
 # Defaults to the v0.8 cleaned chat model used by the v1.4/v1.5 experiments.
 #
-# v1.5.9 additions:
+# v1.5.12 additions:
 #   - conservative chat-level Unknown rejection
 #   - multiple probe generations
 #   - token-confidence / response-agreement checks
@@ -26,6 +26,7 @@ import time
 from typing import List, Tuple
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 
 from model import LanguageModel
@@ -34,6 +35,7 @@ from tokenizer_bpe import Tokenizer
 
 DEFAULT_TOKENIZER = "model/tokenizer-v0.7-bpe.json"
 DEFAULT_MODEL = "model/model-gpu-v0.8-chat-clean.pt"
+DEFAULT_CONCEPT_CALIBRATION = "model/concept-calibration-v1512.pt"
 
 USER_PREFIX = "人: "
 AI_PREFIX = "AI: "
@@ -55,6 +57,14 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--tokenizer", default=DEFAULT_TOKENIZER)
     parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument(
+        "--concept-calibration",
+        default=DEFAULT_CONCEPT_CALIBRATION,
+        help=(
+            "Optional v1.5.12 concept calibration checkpoint. "
+            "Uses train-centroid calibrated space when available."
+        ),
+    )
     parser.add_argument("--max-new-tokens", type=int, default=96)
     parser.add_argument("--temperature", type=float, default=0.45)
     parser.add_argument("--top-k", type=int, default=20)
@@ -412,6 +422,75 @@ KNOWN_ENTITY_TOKENS = {
     "AI", "LLM", "CPU", "GPU", "CUDA",
 }
 
+CALIBRATION_PROJECTION = None
+CALIBRATION_CENTROIDS = None
+CALIBRATION_CONCEPTS: list[str] = []
+CALIBRATION_INFO: dict = {}
+
+
+class ChatConceptProjection(nn.Module):
+    """Inference-only projection compatible with v1.5.12 checkpoints."""
+
+    def __init__(self, in_dim: int, hidden_dim: int, out_dim: int):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(in_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, out_dim),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return F.normalize(self.net(x), dim=-1)
+
+
+def load_concept_calibration(path: Path, device: torch.device) -> bool:
+    global CALIBRATION_PROJECTION
+    global CALIBRATION_CENTROIDS
+    global CALIBRATION_CONCEPTS
+    global CALIBRATION_INFO
+
+    if not path.exists():
+        CALIBRATION_PROJECTION = None
+        CALIBRATION_CENTROIDS = None
+        CALIBRATION_CONCEPTS = []
+        CALIBRATION_INFO = {"loaded": False, "path": str(path)}
+        return False
+
+    ckpt = torch.load(str(path), map_location=device)
+
+    if ckpt.get("centroid_source") != "train":
+        raise ValueError(
+            "Concept calibration rejected: centroid_source must be 'train'."
+        )
+    if ckpt.get("holdout_used_for_centroid", True):
+        raise ValueError(
+            "Concept calibration rejected: holdout must not be used for centroid fit."
+        )
+
+    projection = ChatConceptProjection(
+        int(ckpt["input_dim"]),
+        int(ckpt["hidden_dim"]),
+        int(ckpt["output_dim"]),
+    ).to(device)
+    projection.load_state_dict(ckpt["projection_state"])
+    projection.eval()
+
+    CALIBRATION_PROJECTION = projection
+    CALIBRATION_CENTROIDS = F.normalize(
+        ckpt["centroids"].to(device), dim=-1
+    )
+    CALIBRATION_CONCEPTS = list(ckpt["concepts"])
+    CALIBRATION_INFO = {
+        "loaded": True,
+        "path": str(path),
+        "version": ckpt.get("version"),
+        "evaluation_protocol": ckpt.get("evaluation_protocol"),
+        "centroid_source": ckpt.get("centroid_source"),
+        "holdout_used_for_centroid": ckpt.get("holdout_used_for_centroid"),
+    }
+    return True
+
+
 CONCEPT_ANCHORS = {
     "AI": (
         "AIは人工知能です",
@@ -470,8 +549,44 @@ def concept_slot_match(
     min_similarity: float = 0.82,
     min_margin: float = 0.005,
 ) -> tuple[bool, float, float]:
-    """Concept-aware fallback using prototype similarity and nearest-concept margin."""
+    """Concept-aware fallback.
+
+    v1.5.12 prefers the calibrated train-centroid space. If no compatible
+    checkpoint is loaded, it falls back to the raw prototype method.
+    """
     target = _clean_slot(slot).upper()
+
+    if (
+        CALIBRATION_PROJECTION is not None
+        and CALIBRATION_CENTROIDS is not None
+        and target in CALIBRATION_CONCEPTS
+    ):
+        target_idx = CALIBRATION_CONCEPTS.index(target)
+        best_score = -1.0
+        best_margin = -1.0
+
+        for span in answer_semantic_spans(answer):
+            raw = semantic_vector(model, tokenizer, span)
+            z = CALIBRATION_PROJECTION(raw.unsqueeze(0))[0]
+            sims = z @ CALIBRATION_CENTROIDS.T
+
+            target_score = float(sims[target_idx].item())
+            mask = torch.ones(
+                len(CALIBRATION_CONCEPTS),
+                dtype=torch.bool,
+                device=sims.device,
+            )
+            mask[target_idx] = False
+            other_best = float(sims[mask].max().item())
+            margin = target_score - other_best
+
+            if margin > best_margin:
+                best_score = target_score
+                best_margin = margin
+
+        ok = best_margin >= 0.0
+        return ok, best_score, best_margin
+
     target_proto = concept_prototype(model, tokenizer, target)
     if target_proto is None:
         return False, -1.0, -1.0
@@ -825,7 +940,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.5.9 Semantic Slot Equivalence / Concept-Aware Gate")
+    print(" LLM_GPU Chat - v1.5.12 Train-Centroid Calibrated Concept Gate")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
@@ -847,6 +962,15 @@ def print_info(
         print("Min agreement   :", args.min_agreement)
         print("Fallback        :", UNKNOWN_REPLY)
         print("Context policy  : minimal")
+        print(
+            "Concept calib   :",
+            CALIBRATION_INFO.get("version", "raw fallback")
+            if CALIBRATION_INFO.get("loaded")
+            else "raw fallback",
+        )
+        if CALIBRATION_INFO.get("loaded"):
+            print("Centroid source : TRAIN ONLY")
+            print("Holdout in fit  :", CALIBRATION_INFO.get("holdout_used_for_centroid"))
     print()
 
 
@@ -876,6 +1000,9 @@ def main() -> None:
         str(model_path),
         device=device,
     )
+
+    calibration_path = Path(args.concept_calibration)
+    load_concept_calibration(calibration_path, device)
 
     if model.vocab_size != tokenizer.vocab_size:
         raise ValueError(
