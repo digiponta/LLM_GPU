@@ -476,11 +476,13 @@ def recover_forgotten_pairs_from_queue(
     teaching_queue: Path,
     learning_log: Path,
     learning_state: Path,
-) -> tuple[int, int]:
+) -> tuple[int, int, int]:
     if not teaching_queue.exists():
-        return 0, 0
+        return 0, 0, 0
 
     queued_questions: list[str] = []
+    seen_questions: set[str] = set()
+
     for raw in teaching_queue.read_text(encoding="utf-8").splitlines():
         if not raw.strip():
             continue
@@ -490,32 +492,50 @@ def recover_forgotten_pairs_from_queue(
             continue
         if str(row.get("resolution", "")) != "LEARNING_GAP":
             continue
+        if str(row.get("status", "pending")) == "resolved":
+            continue
+
         question = str(row.get("user", "")).strip()
-        if question:
+        qn = normalize_pair_text(question).lower()
+        if question and qn not in seen_questions:
+            seen_questions.add(qn)
             queued_questions.append(question)
 
     if not queued_questions:
-        return 0, 0
+        return 0, 0, 0
 
     trusted_pairs = trusted_pairs_from_log(learning_log)
     reactivated = 0
     matched = 0
+    rejected_old_teachers = 0
 
     for question in queued_questions:
         qn = normalize_pair_text(question).lower()
         best: tuple[str, str] | None = None
-        best_score = 0.0
+        best_rank = -1.0
 
         for user, answer in trusted_pairs:
             un = normalize_pair_text(user).lower()
-            score = response_similarity(qn, un)
+            similarity = response_similarity(qn, un)
             if qn == un:
-                score = 1.0
-            if score > best_score:
-                best_score = score
+                similarity = 1.0
+            if similarity < 0.80:
+                continue
+
+            teaching_ok, _ = validate_teaching_answer(user, answer)
+            if not teaching_ok:
+                rejected_old_teachers += 1
+                continue
+
+            # Prefer the closest question match. For equal question similarity,
+            # prefer the more informative answer rather than a short synonym.
+            informativeness = min(len(normalize_pair_text(answer)) / 200.0, 0.20)
+            rank = similarity + informativeness
+            if rank > best_rank:
+                best_rank = rank
                 best = (user, answer)
 
-        if best is None or best_score < 0.80:
+        if best is None:
             continue
 
         matched += 1
@@ -526,7 +546,52 @@ def recover_forgotten_pairs_from_queue(
         ):
             reactivated += 1
 
-    return matched, reactivated
+    return matched, reactivated, rejected_old_teachers
+
+
+def resolve_teaching_queue(
+    teaching_queue: Path,
+    question: str,
+) -> int:
+    if not teaching_queue.exists():
+        return 0
+
+    target = normalize_pair_text(question).lower()
+    changed = 0
+    rows: list[dict] = []
+
+    for raw in teaching_queue.read_text(encoding="utf-8").splitlines():
+        if not raw.strip():
+            continue
+        try:
+            row = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+
+        queued_question = normalize_pair_text(
+            str(row.get("user", ""))
+        ).lower()
+        if (
+            str(row.get("resolution", "")) == "LEARNING_GAP"
+            and queued_question == target
+            and str(row.get("status", "pending")) != "resolved"
+        ):
+            row["status"] = "resolved"
+            row["resolved_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+            changed += 1
+
+        rows.append(row)
+
+    if changed:
+        teaching_queue.write_text(
+            "".join(
+                json.dumps(row, ensure_ascii=False) + "\n"
+                for row in rows
+            ),
+            encoding="utf-8",
+        )
+
+    return changed
 
 
 def run_online_training(
@@ -1763,7 +1828,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.6.16 Automatic Forgetting Recovery")
+    print(" LLM_GPU Chat - v1.6.17 Validated Forgetting Recovery")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
@@ -1995,14 +2060,15 @@ def main() -> None:
             continue
 
         if command == "/maintain":
-            matched, reactivated = recover_forgotten_pairs_from_queue(
+            matched, reactivated, rejected_old = recover_forgotten_pairs_from_queue(
                 Path(args.teaching_queue),
                 learning_log,
                 learning_state,
             )
             print(
                 f"[maintenance matched={matched}, "
-                f"reactivated={reactivated}]"
+                f"reactivated={reactivated}, "
+                f"rejected_old_teachers={rejected_old}]"
             )
             if reactivated:
                 print("[run /train to relearn reactivated trusted pairs]")
@@ -2238,6 +2304,12 @@ def main() -> None:
         # only accepted KNOWN turns may enter future generation context.
         # UNKNOWN/rejected turns are intentionally discarded.
         if accepted:
+            resolved = resolve_teaching_queue(
+                Path(args.teaching_queue),
+                user_text,
+            )
+            if resolved:
+                print(f"[resolved teaching queue entries: {resolved}]")
             history.append((user_text, reply))
             last_ai_reply = reply
             if learning_enabled:
