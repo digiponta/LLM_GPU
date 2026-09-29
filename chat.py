@@ -3,7 +3,7 @@
 # Interactive chat interface for the current LLM_GPU conversational checkpoint.
 # Defaults to the v0.8 cleaned chat model used by the v1.4/v1.5 experiments.
 #
-# v1.5.8 additions:
+# v1.5.9 additions:
 #   - conservative chat-level Unknown rejection
 #   - multiple probe generations
 #   - token-confidence / response-agreement checks
@@ -412,6 +412,97 @@ KNOWN_ENTITY_TOKENS = {
     "AI", "LLM", "CPU", "GPU", "CUDA",
 }
 
+CONCEPT_ANCHORS = {
+    "AI": (
+        "AIは人工知能です",
+        "人工知能は人間の知的処理を機械で実現する技術です",
+    ),
+    "LLM": (
+        "LLMは大規模言語モデルです",
+        "大規模言語モデルは文章を理解し生成するモデルです",
+    ),
+    "CPU": (
+        "CPUは中央処理装置です",
+        "CPUは汎用的な命令実行と制御処理を担当します",
+    ),
+    "GPU": (
+        "GPUは画像処理装置です",
+        "GPUは大量の並列計算を得意とする演算装置です",
+    ),
+    "CUDA": (
+        "CUDAはNVIDIAのGPU向け汎用計算技術です",
+        "CUDAはGPUで計算を実行するための技術です",
+    ),
+}
+
+
+@torch.no_grad()
+def concept_prototype(
+    model: LanguageModel,
+    tokenizer: Tokenizer,
+    concept: str,
+) -> torch.Tensor | None:
+    key = _clean_slot(concept).upper()
+    anchors = CONCEPT_ANCHORS.get(key)
+    if not anchors:
+        return None
+    vectors = [semantic_vector(model, tokenizer, text) for text in anchors]
+    return F.normalize(torch.stack(vectors, dim=0).mean(dim=0), dim=0)
+
+
+def answer_semantic_spans(answer: str) -> list[str]:
+    spans = [
+        s.strip()
+        for s in re.split(r"[。！？!?、,]|(?:一方)|(?:対して)", answer)
+        if s.strip()
+    ]
+    if answer.strip() and answer.strip() not in spans:
+        spans.append(answer.strip())
+    return spans
+
+
+@torch.no_grad()
+def concept_slot_match(
+    model: LanguageModel,
+    tokenizer: Tokenizer,
+    slot: str,
+    answer: str,
+    min_similarity: float = 0.82,
+    min_margin: float = 0.005,
+) -> tuple[bool, float, float]:
+    """Concept-aware fallback using prototype similarity and nearest-concept margin."""
+    target = _clean_slot(slot).upper()
+    target_proto = concept_prototype(model, tokenizer, target)
+    if target_proto is None:
+        return False, -1.0, -1.0
+
+    other_protos = []
+    for concept in CONCEPT_ANCHORS:
+        if concept == target:
+            continue
+        p = concept_prototype(model, tokenizer, concept)
+        if p is not None:
+            other_protos.append(p)
+
+    best_sim = -1.0
+    best_margin = -1.0
+    for span in answer_semantic_spans(answer):
+        sv = semantic_vector(model, tokenizer, span)
+        target_sim = float(torch.dot(target_proto, sv).item())
+        other_best = max(
+            (float(torch.dot(p, sv).item()) for p in other_protos),
+            default=-1.0,
+        )
+        margin = target_sim - other_best
+        if target_sim > best_sim or (
+            abs(target_sim - best_sim) < 1e-9 and margin > best_margin
+        ):
+            best_sim = target_sim
+            best_margin = margin
+
+    ok = best_sim >= min_similarity and best_margin >= min_margin
+    return ok, best_sim, best_margin
+
 
 def _clean_slot(slot: str) -> str:
     slot = slot.strip()
@@ -596,20 +687,44 @@ def semantic_consistency_check(
     slots_ok, slot_coverage, slot_reason = slot_coverage_check(
         intent, slots, answer
     )
-    if not slots_ok:
-        canonical_definition = (
-            intent == "definition"
-            and len(slots) == 1
-            and _clean_slot(slots[0]).upper() in KNOWN_ENTITY_TOKENS
-        )
-        if canonical_definition and current_sim >= 0.86:
+    if not slots_ok and intent in ("definition", "comparison") and slots:
+        covered = 0
+        evidence: list[str] = []
+        for slot in slots:
+            if slot_present(slot, answer):
+                covered += 1
+                evidence.append(f"{slot}:lexical")
+                continue
+
+            concept_ok, concept_sim, concept_margin = concept_slot_match(
+                model=model,
+                tokenizer=tokenizer,
+                slot=slot,
+                answer=answer,
+            )
+            if concept_ok:
+                covered += 1
+                evidence.append(
+                    f"{slot}:concept({concept_sim:.3f}/{concept_margin:.3f})"
+                )
+            else:
+                evidence.append(
+                    f"{slot}:miss({concept_sim:.3f}/{concept_margin:.3f})"
+                )
+
+        slot_coverage = covered / len(slots)
+        if slot_coverage >= 1.0:
             slots_ok = True
-            slot_coverage = 1.0
-            slot_reason = "definition semantic fallback"
+            slot_reason = "concept-aware slots: " + ", ".join(evidence)
         else:
             return (
-                False, current_sim, 0.0, slot_reason,
-                intent, slots, slot_coverage,
+                False,
+                current_sim,
+                0.0,
+                "concept slot missing: " + ", ".join(evidence),
+                intent,
+                slots,
+                slot_coverage,
             )
 
     # Greeting turns are intentionally short and semantically broad.
@@ -710,7 +825,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.5.8 Intent-Calibrated Acceptance")
+    print(" LLM_GPU Chat - v1.5.9 Semantic Slot Equivalence / Concept-Aware Gate")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
