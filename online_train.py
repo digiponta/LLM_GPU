@@ -34,7 +34,7 @@ SEED = 42
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Deduplicated incremental-only conversational training for LLM_GPU v1.6.2."
+        description="Forgetting-aware incremental conversational training for LLM_GPU v1.6.19."
     )
     p.add_argument("--chat-data", default="data/chat_history.jsonl")
     p.add_argument("--replay-data", default="data/conversation-ja.txt")
@@ -53,6 +53,7 @@ def parse_args() -> argparse.Namespace:
         help="Replay pairs per new chat pair.",
     )
     p.add_argument("--manual-weight", type=int, default=4)
+    p.add_argument("--recovery-weight", type=int, default=8)
     p.add_argument("--auto-weight", type=int, default=0)
     p.add_argument(
         "--state",
@@ -107,17 +108,25 @@ def pair_fingerprint(user: str, answer: str) -> str:
 def deduplicate_trusted_rows(
     rows: List[Tuple[str, str, str]],
 ) -> List[Tuple[str, str, str]]:
-    seen: set[str] = set()
-    unique: List[Tuple[str, str, str]] = []
+    priority = {
+        "chat-approved": 1,
+        "chat-manual": 2,
+        "chat-recovery": 3,
+    }
+    selected: dict[str, Tuple[str, str, str]] = {}
+
     for user, answer, source in rows:
-        if source not in ("chat-manual", "chat-approved"):
+        if source not in priority:
             continue
         fp = pair_fingerprint(user, answer)
-        if fp in seen:
-            continue
-        seen.add(fp)
-        unique.append((user, answer, source))
-    return unique
+        previous = selected.get(fp)
+        if (
+            previous is None
+            or priority[source] > priority[previous[2]]
+        ):
+            selected[fp] = (user, answer, source)
+
+    return list(selected.values())
 
 
 def load_training_state(path: Path) -> set[str]:
@@ -270,13 +279,19 @@ def main() -> None:
 
     manual_rows = [(u, a) for u, a, s in pending_rows if s == "chat-manual"]
     approved_rows = [(u, a) for u, a, s in pending_rows if s == "chat-approved"]
-    auto_rows = [(u, a) for u, a, s in new_rows if s not in ("chat-manual", "chat-approved")]
+    recovery_rows = [(u, a) for u, a, s in pending_rows if s == "chat-recovery"]
+    auto_rows = [
+        (u, a) for u, a, s in new_rows
+        if s not in ("chat-manual", "chat-approved", "chat-recovery")
+    ]
 
     weighted_new_pairs: List[Tuple[str, str]] = []
     for pair in manual_rows:
         weighted_new_pairs.extend([pair] * max(1, args.manual_weight))
     for pair in approved_rows:
         weighted_new_pairs.extend([pair] * max(1, args.manual_weight))
+    for pair in recovery_rows:
+        weighted_new_pairs.extend([pair] * max(1, args.recovery_weight))
 
     trusted_replay: List[Tuple[str, str]] = []
     for user, answer, _ in historical_rows:
@@ -332,7 +347,7 @@ def main() -> None:
     )
 
     print("=" * 72)
-    print(" LLM_GPU v1.6.2 Deduplicated Incremental-Only Learning")
+    print(" LLM_GPU v1.6.19 Strong Forgetting-Recovery Learning")
     print("=" * 72)
     print("Device          :", device)
     if device.type == "cuda":
@@ -345,6 +360,7 @@ def main() -> None:
     print("Prior trusted   :", len(historical_rows), f"(x{args.trusted_replay_weight})")
     print("Manual new      :", len(manual_rows), f"(x{args.manual_weight})")
     print("Approved new    :", len(approved_rows), f"(x{args.manual_weight})")
+    print("Recovery new    :", len(recovery_rows), f"(x{args.recovery_weight})")
     print("Legacy auto     :", len(auto_rows), "(ignored)")
     print("Corpus replay   :", replay_count, f"(x{args.replay_weight})")
     print("Tiny-data mode  :", tiny_mode)
