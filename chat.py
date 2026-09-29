@@ -869,6 +869,16 @@ def greeting_consistent(answer: str) -> bool:
     return any(x in a for x in greeting_terms)
 
 
+
+def definition_is_echo_only(slot: str, answer: str) -> bool:
+    answer_norm = _normalize_for_similarity(answer)
+    aliases = {
+        _normalize_for_similarity(alias)
+        for alias in slot_aliases(slot)
+    }
+    return answer_norm in aliases
+
+
 def slot_coverage_check(
     intent: str,
     slots: list[str],
@@ -889,13 +899,7 @@ def slot_coverage_check(
         if coverage < 1.0:
             return False, coverage, f"definition focus missing: {slots[0]}"
 
-        # A pure echo such as "人工知能" is not a useful definition.
-        answer_norm = _normalize_for_similarity(answer)
-        aliases = {
-            _normalize_for_similarity(alias)
-            for alias in slot_aliases(slots[0])
-        }
-        if answer_norm in aliases:
+        if definition_is_echo_only(slots[0], answer):
             return False, coverage, "definition answer is only an echo"
 
         return True, coverage, "definition slot covered"
@@ -968,6 +972,24 @@ def semantic_consistency_check(
     slots_ok, slot_coverage, slot_reason = slot_coverage_check(
         intent, slots, answer
     )
+
+    # v1.6.4 hard constraint: a definition that is only the focus term or
+    # one of its aliases is incomplete. Do not let concept fallback override it.
+    if (
+        intent == "definition"
+        and slots
+        and definition_is_echo_only(slots[0], answer)
+    ):
+        return (
+            False,
+            current_sim,
+            0.0,
+            "definition answer is only an echo",
+            intent,
+            slots,
+            slot_coverage,
+        )
+
     if not slots_ok and intent in ("definition", "comparison") and slots:
         covered = 0
         evidence: list[str] = []
@@ -1124,7 +1146,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.6.3 Synonym-Aware + Context-Safe Concept Gate")
+    print(" LLM_GPU Chat - v1.6.4 Definition Completeness + Context-Safe Gate")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
