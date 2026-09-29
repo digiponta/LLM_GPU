@@ -566,7 +566,9 @@ def semantic_vector(
 
 SLOT_ALIASES = {
     "ai": ("ai", "人工知能", "artificial intelligence"),
+    "人工知能": ("人工知能", "ai", "artificial intelligence"),
     "llm": ("llm", "大規模言語モデル", "large language model", "言語モデル"),
+    "大規模言語モデル": ("大規模言語モデル", "llm", "large language model", "言語モデル"),
     "cpu": ("cpu", "中央処理装置", "central processing unit"),
     "gpu": ("gpu", "画像処理装置", "graphics processing unit"),
     "cuda": ("cuda",),
@@ -817,8 +819,8 @@ def extract_definition_focus(text: str) -> str | None:
     """Extract focus from Japanese definition prompts such as 'GPUとは'."""
     compact = text.strip()
     patterns = [
-        r"^\s*([A-Za-z0-9_+.#\-]{2,40})\s*(?:とは|って|とは何|って何)",
-        r"^\s*([^\s、。！？?]{1,40})\s*(?:とは|って)\s*[？?]?$",
+        r"^\s*([A-Za-z0-9_+.#\-]{2,40})\s*(?:とは|って|とは何|って何)\s*[、,。．！？!?？?]*\s*$",
+        r"^\s*([^\s、。！？?]{1,40})\s*(?:とは|って)\s*[、,。．！？!?？?]*\s*$",
     ]
     for p in patterns:
         m = re.search(p, compact, flags=re.IGNORECASE)
@@ -886,6 +888,16 @@ def slot_coverage_check(
     if intent == "definition":
         if coverage < 1.0:
             return False, coverage, f"definition focus missing: {slots[0]}"
+
+        # A pure echo such as "人工知能" is not a useful definition.
+        answer_norm = _normalize_for_similarity(answer)
+        aliases = {
+            _normalize_for_similarity(alias)
+            for alias in slot_aliases(slots[0])
+        }
+        if answer_norm in aliases:
+            return False, coverage, "definition answer is only an echo"
+
         return True, coverage, "definition slot covered"
 
     if intent == "comparison":
@@ -1005,13 +1017,31 @@ def semantic_consistency_check(
         )
 
     previous_sims: List[float] = []
+    contamination_candidates: List[float] = []
     for old_user, _ in history[-3:]:
         pv = semantic_vector(model, tokenizer, old_user)
-        previous_sims.append(float(torch.dot(pv, av).item()))
+        old_answer_sim = float(torch.dot(pv, av).item())
+        old_current_sim = float(torch.dot(pv, qv).item())
+        previous_sims.append(old_answer_sim)
+
+        # v1.6.3: history is suspicious only when the previous question is
+        # materially different from the current question. Closely related
+        # paraphrases/synonyms must not be rejected merely because the answer
+        # also matches the previous turn.
+        if old_current_sim < 0.82:
+            contamination_candidates.append(old_answer_sim)
 
     previous_best = max(previous_sims) if previous_sims else -1.0
+    contamination_best = (
+        max(contamination_candidates)
+        if contamination_candidates
+        else -1.0
+    )
 
-    if previous_sims and previous_best > current_sim + contamination_margin:
+    if (
+        contamination_candidates
+        and contamination_best > current_sim + contamination_margin
+    ):
         return (
             False,
             current_sim,
@@ -1094,7 +1124,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.6.2 Incremental Teaching + Calibrated Concept Gate")
+    print(" LLM_GPU Chat - v1.6.3 Synonym-Aware + Context-Safe Concept Gate")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
