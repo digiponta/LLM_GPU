@@ -12417,3 +12417,12 @@ Outputs:
 
     results/relation_paraphrase_generalization_v145/diagnostic.log
     results/relation_paraphrase_generalization_v145/summary.csv
+
+---
+
+## License
+
+This project is licensed under the **Apache License 2.0**.
+
+Copyright © Hirofumi Inomata.
+
