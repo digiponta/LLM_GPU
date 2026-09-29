@@ -904,6 +904,43 @@ def extract_definition_focus(text: str) -> str | None:
     return None
 
 
+
+def input_quality_check(text: str) -> tuple[bool, str]:
+    q = text.strip()
+    if not q:
+        return False, "empty input"
+
+    compact = _normalize_for_similarity(q)
+
+    # Repeated interrogative fragments such as "とはとは".
+    if re.search(r"(とは){2,}|(って){2,}", q):
+        return False, "malformed repeated intent"
+
+    # Obvious typo pattern observed in regression: a known technical acronym
+    # followed by an unrelated single kanji instead of an interrogative form.
+    if re.fullmatch(r"(AI|CPU|GPU|LLM|CUDA)[一-龯]", q, flags=re.IGNORECASE):
+        return False, "malformed technical-term suffix"
+
+    # Multiple bare known entities plus a broken definition marker are
+    # ambiguous rather than a well-formed comparison/definition request.
+    known_hits = re.findall(r"\b(?:AI|CPU|GPU|LLM|CUDA)\b", q, flags=re.IGNORECASE)
+    if len(set(x.upper() for x in known_hits)) >= 2 and "とは" in q:
+        if not re.search(r"(違い|比較|差)", q):
+            return False, "incoherent multi-concept input"
+
+    # Very short garbage around a known acronym should not be auto-corrected.
+    if len(compact) <= 6 and re.search(r"(AI|CPU|GPU|LLM|CUDA)", q, flags=re.IGNORECASE):
+        if not (
+            extract_definition_focus(q)
+            or re.search(r"(について|説明|教えて|違い|比較)", q)
+        ):
+            # Bare acronym is still allowed as a general query.
+            if compact.upper() not in {"AI", "CPU", "GPU", "LLM", "CUDA"}:
+                return False, "malformed short technical query"
+
+    return True, "input accepted"
+
+
 def classify_intent_and_slots(question: str) -> tuple[str, list[str]]:
     q = question.strip()
     q_lower = q.lower()
@@ -1364,7 +1401,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.6.8 Output Quality + Semantic Probe Gate")
+    print(" LLM_GPU Chat - v1.6.10 Input Quality + Answer-Aware Gate")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
@@ -1592,6 +1629,24 @@ def main() -> None:
             continue
 
         last_user_text = user_text
+
+        input_ok, input_reason = input_quality_check(user_text)
+        if not input_ok:
+            print(f"AI> {UNKNOWN_REPLY}")
+            if args.show_risk and args.unknown_rejection:
+                print(
+                    f"[gate=UNKNOWN, confidence=0.000, "
+                    f"min_tok_conf=0.000, mean_margin=0.000, "
+                    f"agreement=0.000, sem_agreement=0.000, "
+                    f"intent=input_quality, slots=-, slot_cov=0.00, "
+                    f"qa_sim=0.000, prev_sim=-1.000, "
+                    f"agr_th={args.min_agreement:.2f}, "
+                    f"context_turns=0, reason={input_reason}]"
+                )
+            print("[0 generated probe tokens, 0.00s, 0.0 tok/s]")
+            print()
+            last_ai_reply = None
+            continue
 
         prompt, selected_history = build_prompt(
             history=history,
