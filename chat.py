@@ -478,9 +478,9 @@ def recover_forgotten_pairs_from_queue(
     teaching_queue: Path,
     learning_log: Path,
     learning_state: Path,
-) -> tuple[int, int, int]:
+) -> tuple[int, int, int, list[tuple[str, str, str]]]:
     if not teaching_queue.exists():
-        return 0, 0, 0
+        return 0, 0, 0, []
 
     queued_questions: list[str] = []
     seen_questions: set[str] = set()
@@ -504,12 +504,13 @@ def recover_forgotten_pairs_from_queue(
             queued_questions.append(question)
 
     if not queued_questions:
-        return 0, 0, 0
+        return 0, 0, 0, []
 
     trusted_pairs = trusted_pairs_from_log(learning_log)
     reactivated = 0
     matched = 0
     rejected_old_teachers = 0
+    selections: list[tuple[str, str, str]] = []
 
     for question in queued_questions:
         qn = normalize_pair_text(question).lower()
@@ -531,9 +532,6 @@ def recover_forgotten_pairs_from_queue(
                 else None
             )
 
-            # Definition recovery must preserve the exact requested concept.
-            # "AIとは" must never be used to repair "LLMとは" merely because
-            # both short strings share the Japanese suffix "とは".
             if queued_intent == "definition":
                 if trusted_intent != "definition":
                     continue
@@ -547,8 +545,6 @@ def recover_forgotten_pairs_from_queue(
             if similarity < 0.80:
                 continue
 
-            # Validate both against the historical question and, crucially,
-            # against the current queued question.
             historical_ok, _ = validate_teaching_answer(user, answer)
             queued_ok, _ = validate_teaching_answer(question, answer)
             if not historical_ok or not queued_ok:
@@ -565,9 +561,11 @@ def recover_forgotten_pairs_from_queue(
                 best = (user, answer)
 
         if best is None:
+            selections.append((question, "", "no valid trusted teacher"))
             continue
 
         matched += 1
+        selections.append((question, best[1], f"trusted question={best[0]}"))
         if mark_pair_for_retraining(
             learning_state,
             best[0],
@@ -581,7 +579,7 @@ def recover_forgotten_pairs_from_queue(
             )
             reactivated += 1
 
-    return matched, reactivated, rejected_old_teachers
+    return matched, reactivated, rejected_old_teachers, selections
 
 
 def resolve_teaching_queue(
@@ -1873,7 +1871,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.6.22 Concept-Safe Recovery")
+    print(" LLM_GPU Chat - v1.6.23 Recovery Teacher Diagnostics")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
@@ -2105,7 +2103,7 @@ def main() -> None:
             continue
 
         if command == "/maintain":
-            matched, reactivated, rejected_old = recover_forgotten_pairs_from_queue(
+            matched, reactivated, rejected_old, selections = recover_forgotten_pairs_from_queue(
                 Path(args.teaching_queue),
                 learning_log,
                 learning_state,
@@ -2115,6 +2113,17 @@ def main() -> None:
                 f"reactivated={reactivated}, "
                 f"rejected_old_teachers={rejected_old}]"
             )
+            for queued_question, teacher_answer, detail in selections:
+                if teacher_answer:
+                    print(
+                        f"[recovery selected: {queued_question} -> "
+                        f"{teacher_answer} ({detail})]"
+                    )
+                else:
+                    print(
+                        f"[recovery selected: {queued_question} -> NONE "
+                        f"({detail})]"
+                    )
             if reactivated:
                 print("[run /train to relearn reactivated trusted pairs]")
             elif matched:
