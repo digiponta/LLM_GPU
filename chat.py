@@ -43,6 +43,9 @@ DEFAULT_PREVIOUS_ONLINE_MODEL = "model/model-gpu-v1.6.1-online.pt"
 DEFAULT_CONCEPT_CALIBRATION = "model/concept-calibration-v1512.pt"
 DEFAULT_LEARNING_LOG = "data/chat_history.jsonl"
 DEFAULT_LEARNING_STATE = "data/chat_learning_state.json"
+DEFAULT_TEACHING_QUEUE = "data/teaching_queue.jsonl"
+DEFAULT_KNOWLEDGE_QUEUE = "data/knowledge_queue.jsonl"
+DEFAULT_GATE_REVIEW_QUEUE = "data/gate_review_queue.jsonl"
 DEFAULT_ONLINE_MODEL = "model/model-gpu-v1.6.2-online.pt"
 DEFAULT_ONLINE_TRAINER = "online_train.py"
 
@@ -80,6 +83,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--repetition-penalty", type=float, default=1.05)
     parser.add_argument("--learning-log", default=DEFAULT_LEARNING_LOG)
     parser.add_argument("--learning-state", default=DEFAULT_LEARNING_STATE)
+    parser.add_argument("--teaching-queue", default=DEFAULT_TEACHING_QUEUE)
+    parser.add_argument("--knowledge-queue", default=DEFAULT_KNOWLEDGE_QUEUE)
+    parser.add_argument("--gate-review-queue", default=DEFAULT_GATE_REVIEW_QUEUE)
     parser.add_argument(
         "--learn",
         action=argparse.BooleanOptionalAction,
@@ -262,6 +268,62 @@ def append_learning_pair(
     }
     with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def append_route_record(
+    path: Path,
+    resolution: str,
+    action: str,
+    user_text: str,
+    candidate_answer: str,
+    reason: str,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    row = {
+        "resolution": resolution,
+        "action": action,
+        "user": user_text,
+        "candidate_answer": candidate_answer,
+        "reason": reason,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    }
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def route_resolution_action(
+    args: argparse.Namespace,
+    resolution: str,
+    action: str,
+    user_text: str,
+    candidate_answer: str,
+    reason: str,
+) -> str:
+    if resolution == "LEARNING_GAP":
+        path = Path(args.teaching_queue)
+        append_route_record(
+            path, resolution, action, user_text, candidate_answer, reason
+        )
+        return f"queued teaching candidate -> {path}"
+
+    if resolution == "UNKNOWN_KNOWLEDGE":
+        path = Path(args.knowledge_queue)
+        append_route_record(
+            path, resolution, action, user_text, candidate_answer, reason
+        )
+        return f"queued knowledge request -> {path}"
+
+    if resolution == "GATE_REVIEW":
+        path = Path(args.gate_review_queue)
+        append_route_record(
+            path, resolution, action, user_text, candidate_answer, reason
+        )
+        return f"queued gate review -> {path}"
+
+    if resolution == "INPUT_REJECT":
+        return "request rephrase"
+
+    return "normal response"
 
 
 def learning_log_count(path: Path) -> int:
@@ -1505,7 +1567,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.6.12 Resolution-Aware Routing")
+    print(" LLM_GPU Chat - v1.6.13 Automatic Action Routing")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
@@ -1530,6 +1592,9 @@ def print_info(
         print("Min sem agree   :", args.min_semantic_agreement)
         print("Fallback        :", UNKNOWN_REPLY)
         print("Context policy  : minimal")
+        print("Teaching queue  :", args.teaching_queue)
+        print("Knowledge queue :", args.knowledge_queue)
+        print("Gate review q   :", args.gate_review_queue)
         print(
             "Concept calib   :",
             CALIBRATION_INFO.get("version", "raw fallback")
@@ -1748,6 +1813,7 @@ def main() -> None:
                     f"context_turns=0, resolution=INPUT_REJECT, "
                     f"action=ask/rephrase, reason={input_reason}]"
                 )
+            print("[route=request rephrase]")
             print("[0 generated probe tokens, 0.00s, 0.0 tok/s]")
             print()
             last_ai_reply = None
@@ -1879,6 +1945,14 @@ def main() -> None:
             reason,
             user_text,
         )
+        route_result = route_resolution_action(
+            args=args,
+            resolution=resolution,
+            action=action,
+            user_text=user_text,
+            candidate_answer=primary.text,
+            reason=reason,
+        )
 
         reply = primary.text if accepted else UNKNOWN_REPLY
         new_tokens = sum(r.token_count for r in results)
@@ -1917,7 +1991,7 @@ def main() -> None:
                 f"{semantic_part}, "
                 f"context_turns={len(selected_history)}, "
                 f"resolution={resolution}, action={action}, "
-                f"reason={reason}]"
+                f"route={route_result}, reason={reason}]"
             )
 
         print(
