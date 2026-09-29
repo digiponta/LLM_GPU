@@ -133,6 +133,12 @@ def parse_args() -> argparse.Namespace:
         help="Minimum mean textual agreement between probe responses.",
     )
     parser.add_argument(
+        "--min-semantic-agreement",
+        type=float,
+        default=0.82,
+        help="Minimum mean cosine similarity between probe response vectors.",
+    )
+    parser.add_argument(
         "--semantic-consistency",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -562,6 +568,26 @@ def semantic_vector(
     token_states = x[0, 1:, :] if x.shape[1] > 1 else x[0]
     v = token_states.mean(dim=0)
     return F.normalize(v, dim=0)
+
+
+@torch.no_grad()
+def mean_pairwise_semantic_agreement(
+    model: LanguageModel,
+    tokenizer: Tokenizer,
+    results: List[GenerationResult],
+) -> float:
+    if len(results) < 2:
+        return 1.0
+
+    vectors = [
+        semantic_vector(model, tokenizer, result.text)
+        for result in results
+    ]
+    values: List[float] = []
+    for i in range(len(vectors)):
+        for j in range(i + 1, len(vectors)):
+            values.append(float(torch.dot(vectors[i], vectors[j]).item()))
+    return sum(values) / len(values) if values else 1.0
 
 
 SLOT_ALIASES = {
@@ -1226,37 +1252,71 @@ def calibrated_agreement_threshold(
 
 
 def evaluate_unknown_gate(
+    model: LanguageModel,
+    tokenizer: Tokenizer,
     results: List[GenerationResult],
     min_confidence: float,
     min_agreement: float,
-) -> Tuple[bool, float, float, str]:
+    min_semantic_agreement: float,
+    allow_semantic_rescue: bool,
+) -> Tuple[bool, float, float, float, str]:
     if not results:
-        return False, 0.0, 0.0, "no generation"
+        return False, 0.0, 0.0, 0.0, "no generation"
 
     primary = results[0]
 
     if malformed_or_unstable(primary.text):
-        return False, primary.mean_confidence, 0.0, "malformed/repetitive output"
+        return (
+            False,
+            primary.mean_confidence,
+            0.0,
+            0.0,
+            "malformed/repetitive output",
+        )
 
-    agreement = mean_pairwise_agreement(results)
+    lexical_agreement = mean_pairwise_agreement(results)
+    semantic_agreement = mean_pairwise_semantic_agreement(
+        model,
+        tokenizer,
+        results,
+    )
 
     if primary.mean_confidence < min_confidence:
         return (
             False,
             primary.mean_confidence,
-            agreement,
+            lexical_agreement,
+            semantic_agreement,
             "low token confidence",
         )
 
-    if agreement < min_agreement:
+    if lexical_agreement >= min_agreement:
         return (
-            False,
+            True,
             primary.mean_confidence,
-            agreement,
-            "low response agreement",
+            lexical_agreement,
+            semantic_agreement,
+            "accepted",
         )
 
-    return True, primary.mean_confidence, agreement, "accepted"
+    # v1.6.7 semantic rescue is deliberately conservative: it is enabled only
+    # after the primary answer has passed semantic/slot validation.
+    if allow_semantic_rescue and semantic_agreement >= min_semantic_agreement:
+        return (
+            True,
+            primary.mean_confidence,
+            lexical_agreement,
+            semantic_agreement,
+            "semantic probe agreement",
+        )
+
+    return (
+        False,
+        primary.mean_confidence,
+        lexical_agreement,
+        semantic_agreement,
+        "low response agreement",
+    )
 
 
 def print_info(
@@ -1270,7 +1330,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.6.6 Definition Category-Aware + Context-Safe Gate")
+    print(" LLM_GPU Chat - v1.6.7 Semantic Probe Agreement + Context-Safe Gate")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
@@ -1290,6 +1350,7 @@ def print_info(
         print("Probe count     :", args.probe_count)
         print("Min confidence  :", args.min_confidence)
         print("Min agreement   :", args.min_agreement)
+        print("Min sem agree   :", args.min_semantic_agreement)
         print("Fallback        :", UNKNOWN_REPLY)
         print("Context policy  : minimal")
         print(
@@ -1540,6 +1601,7 @@ def main() -> None:
         accepted = True
         confidence = primary.mean_confidence
         agreement = 1.0
+        semantic_agreement = 1.0
         reason = "rejection disabled"
         qa_similarity = 0.0
         previous_similarity = -1.0
@@ -1577,10 +1639,23 @@ def main() -> None:
                 slot_coverage=slot_coverage,
                 base_threshold=args.min_agreement,
             )
-            accepted, confidence, agreement, reason = evaluate_unknown_gate(
-                results,
+            (
+                accepted,
+                confidence,
+                agreement,
+                semantic_agreement,
+                reason,
+            ) = evaluate_unknown_gate(
+                model=model,
+                tokenizer=tokenizer,
+                results=results,
                 min_confidence=args.min_confidence,
                 min_agreement=effective_agreement,
+                min_semantic_agreement=args.min_semantic_agreement,
+                allow_semantic_rescue=(
+                    semantic_ok
+                    and slot_coverage >= 1.0
+                ),
             )
         else:
             effective_agreement = args.min_agreement
@@ -1622,7 +1697,8 @@ def main() -> None:
             print(
                 f"[gate={status}, "
                 f"confidence={confidence:.3f}, "
-                f"agreement={agreement:.3f}"
+                f"agreement={agreement:.3f}, "
+                f"sem_agreement={semantic_agreement:.3f}"
                 f"{semantic_part}, "
                 f"context_turns={len(selected_history)}, "
                 f"reason={reason}]"
