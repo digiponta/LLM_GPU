@@ -287,7 +287,7 @@ def main() -> None:
     replay = load_replay_pairs(replay_path)
     replay_count = min(
         len(replay),
-        max(0, int(round(len(new_rows) * args.replay_ratio))),
+        max(0, int(round(len(pending_rows) * args.replay_ratio))),
     )
     random.shuffle(replay)
     replay_pairs = replay[:replay_count]
@@ -383,12 +383,13 @@ def main() -> None:
                 f"epoch={epoch:02d} train={train_loss:.6f} "
                 f"time={elapsed:.2f}s"
             )
-            best_val = train_loss
-            best_epoch = epoch
-            best_state = {
-                k: v.detach().cpu().clone()
-                for k, v in model.state_dict().items()
-            }
+            if train_loss < best_val:
+                best_val = train_loss
+                best_epoch = epoch
+                best_state = {
+                    k: v.detach().cpu().clone()
+                    for k, v in model.state_dict().items()
+                }
             continue
 
         val_loss = evaluate(model, val_loader, device)
