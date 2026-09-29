@@ -22,6 +22,7 @@ import argparse
 from dataclasses import dataclass
 from pathlib import Path
 import json
+import hashlib
 import re
 import subprocess
 import sys
@@ -38,9 +39,11 @@ from tokenizer_bpe import Tokenizer
 
 DEFAULT_TOKENIZER = "model/tokenizer-v0.7-bpe.json"
 DEFAULT_MODEL = "model/model-gpu-v0.8-chat-clean.pt"
+DEFAULT_PREVIOUS_ONLINE_MODEL = "model/model-gpu-v1.6.1-online.pt"
 DEFAULT_CONCEPT_CALIBRATION = "model/concept-calibration-v1512.pt"
 DEFAULT_LEARNING_LOG = "data/chat_history.jsonl"
-DEFAULT_ONLINE_MODEL = "model/model-gpu-v1.6.1-online.pt"
+DEFAULT_LEARNING_STATE = "data/chat_learning_state.json"
+DEFAULT_ONLINE_MODEL = "model/model-gpu-v1.6.2-online.pt"
 DEFAULT_ONLINE_TRAINER = "online_train.py"
 
 USER_PREFIX = "人: "
@@ -76,6 +79,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--top-k", type=int, default=20)
     parser.add_argument("--repetition-penalty", type=float, default=1.05)
     parser.add_argument("--learning-log", default=DEFAULT_LEARNING_LOG)
+    parser.add_argument("--learning-state", default=DEFAULT_LEARNING_STATE)
     parser.add_argument(
         "--learn",
         action=argparse.BooleanOptionalAction,
@@ -153,6 +157,73 @@ def parse_args() -> argparse.Namespace:
 
 
 
+
+def normalize_pair_text(text: str) -> str:
+    return " ".join(text.strip().split())
+
+
+def pair_fingerprint(user: str, answer: str) -> str:
+    payload = normalize_pair_text(user) + "\n" + normalize_pair_text(answer)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def trusted_fingerprints_from_log(path: Path) -> set[str]:
+    fingerprints: set[str] = set()
+    if not path.exists():
+        return fingerprints
+
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        if not raw.strip():
+            continue
+        try:
+            row = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        source = str(row.get("source", ""))
+        if source not in ("chat-manual", "chat-approved"):
+            continue
+        user = str(row.get("user", "")).strip()
+        answer = str(row.get("assistant", "")).strip()
+        if user and answer:
+            fingerprints.add(pair_fingerprint(user, answer))
+    return fingerprints
+
+
+def initialize_learning_state_if_missing(
+    state_path: Path,
+    learning_log: Path,
+) -> int:
+    if state_path.exists():
+        return 0
+
+    fingerprints = trusted_fingerprints_from_log(learning_log)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "version": "v1.6.2",
+        "trained_fingerprints": sorted(fingerprints),
+    }
+    state_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return len(fingerprints)
+
+
+def choose_startup_model(requested_model: str) -> Path:
+    requested = Path(requested_model)
+    if requested_model != DEFAULT_MODEL:
+        return requested
+
+    candidates = [
+        Path(DEFAULT_ONLINE_MODEL),
+        Path(DEFAULT_PREVIOUS_ONLINE_MODEL),
+        requested,
+    ]
+    for path in candidates:
+        if path.exists():
+            return path
+    return requested
+
 def append_learning_pair(
     path: Path,
     user_text: str,
@@ -199,10 +270,14 @@ def run_online_training(
         "--base-model", str(model_path),
         "--tokenizer", str(args.tokenizer),
         "--output", str(output),
+        "--state", str(args.learning_state),
     ]
     print("[starting incremental training]")
     print(" ".join(cmd))
     completed = subprocess.run(cmd, check=False)
+    if completed.returncode == 3:
+        print("[no new trusted pairs; training skipped]")
+        return None
     if completed.returncode != 0:
         print(f"[training failed: exit={completed.returncode}]")
         return None
@@ -1014,7 +1089,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.6.1 Manual Teaching + Calibrated Concept Gate")
+    print(" LLM_GPU Chat - v1.6.2 Incremental Teaching + Calibrated Concept Gate")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
@@ -1052,7 +1127,7 @@ def main() -> None:
     args = parse_args()
 
     tokenizer_path = Path(args.tokenizer)
-    model_path = Path(args.model)
+    model_path = choose_startup_model(args.model)
 
     if not tokenizer_path.exists():
         raise FileNotFoundError(
@@ -1108,6 +1183,17 @@ def main() -> None:
 
     history: List[Tuple[str, str]] = []
     learning_log = Path(args.learning_log)
+    learning_state = Path(args.learning_state)
+    baseline_count = initialize_learning_state_if_missing(
+        learning_state,
+        learning_log,
+    )
+    if baseline_count:
+        print(
+            f"[v1.6.2 baseline initialized: "
+            f"{baseline_count} existing trusted pair(s) marked as trained]"
+        )
+        print()
     learning_enabled = bool(args.learn)
     last_user_text: str | None = None
     last_ai_reply: str | None = None
