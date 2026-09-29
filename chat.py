@@ -574,6 +574,43 @@ SLOT_ALIASES = {
     "cuda": ("cuda",),
 }
 
+
+STRICT_SYNONYMS = {
+    "ai": ("ai", "人工知能", "artificial intelligence"),
+    "人工知能": ("人工知能", "ai", "artificial intelligence"),
+    "llm": ("llm", "大規模言語モデル", "large language model"),
+    "大規模言語モデル": ("大規模言語モデル", "llm", "large language model"),
+    "cpu": ("cpu", "中央処理装置", "central processing unit"),
+    "gpu": ("gpu", "graphics processing unit"),
+    "cuda": ("cuda",),
+}
+
+DEFINITION_CATEGORIES = {
+    "llm": ("言語モデル",),
+    "大規模言語モデル": ("言語モデル",),
+    "gpu": ("画像処理装置", "プロセッサ", "処理装置"),
+    "cpu": ("中央処理装置", "プロセッサ", "処理装置"),
+    "ai": ("技術", "システム", "人工知能"),
+    "人工知能": ("技術", "システム"),
+}
+
+
+def strict_synonyms(slot: str) -> tuple[str, ...]:
+    key = slot.lower()
+    return STRICT_SYNONYMS.get(
+        key,
+        STRICT_SYNONYMS.get(slot, (slot,)),
+    )
+
+
+def definition_categories(slot: str) -> tuple[str, ...]:
+    key = slot.lower()
+    return DEFINITION_CATEGORIES.get(
+        key,
+        DEFINITION_CATEGORIES.get(slot, ()),
+    )
+
+
 KNOWN_ENTITY_TOKENS = {
     "AI", "LLM", "CPU", "GPU", "CUDA",
 }
@@ -887,9 +924,29 @@ def definition_is_echo_only(slot: str, answer: str) -> bool:
     answer_norm = _normalize_definition_surface(answer)
     aliases = {
         _normalize_definition_surface(alias)
-        for alias in slot_aliases(slot)
+        for alias in strict_synonyms(slot)
     }
-    return answer_norm in aliases
+    if answer_norm in aliases:
+        return True
+
+    # Also reject simple copular synonym statements such as
+    # "人工知能はAIです" when asked for a definition.
+    compact = _normalize_for_similarity(answer)
+    for left in strict_synonyms(slot):
+        left_n = _normalize_for_similarity(left)
+        for right in strict_synonyms(slot):
+            right_n = _normalize_definition_surface(right)
+            if left_n == right_n:
+                continue
+            candidates = (
+                f"{left_n}は{right_n}です",
+                f"{left_n}は{right_n}",
+            )
+            if _normalize_definition_surface(compact) in {
+                _normalize_definition_surface(x) for x in candidates
+            }:
+                return True
+    return False
 
 
 def definition_is_uninformative(slot: str, answer: str) -> bool:
@@ -922,8 +979,16 @@ def definition_is_uninformative(slot: str, answer: str) -> bool:
             return True
 
     # Require at least some content beyond the focus/alias and light particles.
+    # A concrete category relation is informative even when the answer is short:
+    # "LLMは言語モデルです", "GPUは画像処理装置です".
+    if any(
+        _normalize_for_similarity(category) in a
+        for category in definition_categories(slot)
+    ):
+        return False
+
     stripped = a
-    for alias in sorted(slot_aliases(slot), key=len, reverse=True):
+    for alias in sorted(strict_synonyms(slot), key=len, reverse=True):
         stripped = stripped.replace(_normalize_for_similarity(alias), "")
     stripped = re.sub(r"(とは|は|って|を|が|に|で|の|です|だ|である|。|、|,|\.)", "", stripped)
     return len(stripped) < 2
@@ -1205,7 +1270,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.6.5 Definition Informativeness + Context-Safe Gate")
+    print(" LLM_GPU Chat - v1.6.6 Definition Category-Aware + Context-Safe Gate")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
