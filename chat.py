@@ -1191,20 +1191,49 @@ def answer_concept_consistency(
 def classify_resolution(
     accepted: bool,
     reason: str,
+    question: str = "",
 ) -> tuple[str, str]:
     if accepted:
         return "ACCEPT", "none"
 
+    q = question.strip()
+
+    input_markers = (
+        "malformed repeated intent",
+        "malformed technical-term suffix",
+        "incoherent multi-concept input",
+        "malformed short technical query",
+        "empty input",
+    )
+    if any(marker in reason for marker in input_markers):
+        return "INPUT_REJECT", "ask/rephrase"
+
+    # Unknown named entities are not automatically a local training failure.
+    # They should be routed to external knowledge or explicit teaching.
+    if "unknown entity missing" in reason:
+        return "UNKNOWN_KNOWLEDGE", "retrieve/teach"
+
+    # Known concepts with incomplete or contradictory answers indicate that
+    # the current model should be taught rather than the gate relaxed.
     learning_markers = (
         "definition answer is only an echo",
         "definition answer is uninformative",
         "concept slot missing",
-        "unknown entity missing",
+        "answer concept missing",
+        "answer concept conflict",
     )
     if any(marker in reason for marker in learning_markers):
         return "LEARNING_GAP", "teach/train"
 
-    return "GATE_ERROR", "gate/rejection"
+    # A definition-like request for an unknown focus term is also knowledge
+    # absence even when the generation failed before entity matching.
+    focus = extract_definition_focus(q)
+    known_focuses = {"ai", "人工知能", "cpu", "gpu", "llm", "大規模言語モデル", "cuda"}
+    if focus and focus.lower() not in known_focuses:
+        return "UNKNOWN_KNOWLEDGE", "retrieve/teach"
+
+    # Confidence/agreement/quality failures are routed for gate review.
+    return "GATE_REVIEW", "review/gate"
 
 
 def semantic_consistency_check(
@@ -1476,7 +1505,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.6.11 Gate-vs-Learning Separation")
+    print(" LLM_GPU Chat - v1.6.12 Resolution-Aware Routing")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
@@ -1716,8 +1745,8 @@ def main() -> None:
                     f"intent=input_quality, slots=-, slot_cov=0.00, "
                     f"qa_sim=0.000, prev_sim=-1.000, "
                     f"agr_th={args.min_agreement:.2f}, "
-                    f"context_turns=0, resolution=GATE_ERROR, "
-                    f"action=gate/rejection, reason={input_reason}]"
+                    f"context_turns=0, resolution=INPUT_REJECT, "
+                    f"action=ask/rephrase, reason={input_reason}]"
                 )
             print("[0 generated probe tokens, 0.00s, 0.0 tok/s]")
             print()
@@ -1845,7 +1874,11 @@ def main() -> None:
                 reason = semantic_reason
             # Preserve diagnostic reasons such as "semantic probe agreement".
 
-        resolution, action = classify_resolution(accepted, reason)
+        resolution, action = classify_resolution(
+            accepted,
+            reason,
+            user_text,
+        )
 
         reply = primary.text if accepted else UNKNOWN_REPLY
         new_tokens = sum(r.token_count for r in results)
