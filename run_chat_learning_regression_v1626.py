@@ -64,6 +64,35 @@ def run() -> int:
         )
 
     # ------------------------------------------------------------------
+    # 2b. Greeting consistency regression
+    # ------------------------------------------------------------------
+    ok, coverage, reason = chat.slot_coverage_check(
+        "greeting",
+        [],
+        "AIは人工知能です。",
+    )
+    results.append(
+        check(
+            "greeting:non-greeting answer rejected",
+            (not ok) and coverage == 0.0 and reason == "greeting intent mismatch",
+            f"got ok={ok}, coverage={coverage}, reason={reason}",
+        )
+    )
+
+    ok, coverage, reason = chat.slot_coverage_check(
+        "greeting",
+        [],
+        "こんにちは。今日は何について話しましょうか。",
+    )
+    results.append(
+        check(
+            "greeting:greeting answer accepted",
+            ok and coverage == 1.0 and reason == "greeting matched",
+            f"got ok={ok}, coverage={coverage}, reason={reason}",
+        )
+    )
+
+    # ------------------------------------------------------------------
     # 3. Teaching validation regression
     # ------------------------------------------------------------------
     teaching_cases = [
@@ -306,7 +335,7 @@ def run() -> int:
     failed = len(results) - passed
 
     print("=" * 78)
-    print(" LLM_GPU v1.6.26 Chat/Learning Regression")
+    print(" LLM_GPU v1.6.27 Chat/Learning Regression")
     print("=" * 78)
 
     for index, (name, ok, detail) in enumerate(results, 1):
