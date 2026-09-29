@@ -3,7 +3,7 @@
 # Interactive chat interface for the current LLM_GPU conversational checkpoint.
 # Defaults to the v0.8 cleaned chat model used by the v1.4/v1.5 experiments.
 #
-# v1.5.4 additions:
+# v1.5.5 additions:
 #   - conservative chat-level Unknown rejection
 #   - multiple probe generations
 #   - token-confidence / response-agreement checks
@@ -138,49 +138,42 @@ def select_relevant_history(
     user_text: str,
     history_turns: int,
 ) -> List[Tuple[str, str]]:
+    """v1.5.5 minimal-context policy.
+
+    definition  : no raw history
+    comparison  : no raw history
+    greeting    : at most one previous greeting
+    general     : at most one highly similar previous user turn
+    """
     if history_turns <= 0 or not history:
         return []
 
-    current_intent, current_slots = classify_intent_and_slots(user_text)
-    selected: List[Tuple[str, str]] = []
+    current_intent, _ = classify_intent_and_slots(user_text)
 
-    for old_user, old_ai in reversed(history):
-        old_intent, old_slots = classify_intent_and_slots(old_user)
+    if current_intent in ("definition", "comparison"):
+        return []
 
-        relevant = False
+    if current_intent == "greeting":
+        for old_user, old_ai in reversed(history):
+            old_intent, _ = classify_intent_and_slots(old_user)
+            if old_intent == "greeting":
+                return [(old_user, old_ai)]
+        return []
 
-        if current_intent == "greeting":
-            relevant = old_intent == "greeting"
+    # General question: keep only one closely related prior user turn.
+    # Character bigram similarity is deliberately conservative and cheap.
+    best: Tuple[str, str] | None = None
+    best_score = 0.0
+    for old_user, old_ai in history:
+        score = response_similarity(user_text, old_user)
+        if score > best_score:
+            best_score = score
+            best = (old_user, old_ai)
 
-        elif current_intent == "definition":
-            # Keep only definition/comparison turns that mention the same focus.
-            relevant = (
-                old_intent in ("definition", "comparison")
-                and _slot_overlap(current_slots, old_slots)
-            )
+    if best is not None and best_score >= 0.55:
+        return [best]
 
-        elif current_intent == "comparison":
-            # Keep turns that mention either comparison target.
-            relevant = (
-                old_intent in ("definition", "comparison")
-                and _slot_overlap(current_slots, old_slots)
-            )
-
-        else:
-            # General questions are safest with no inherited context unless
-            # there is a directly related slot-bearing turn.
-            relevant = (
-                bool(current_slots)
-                and _slot_overlap(current_slots, old_slots)
-            )
-
-        if relevant:
-            selected.append((old_user, old_ai))
-            if len(selected) >= history_turns:
-                break
-
-    selected.reverse()
-    return selected
+    return []
 
 
 def build_prompt(
@@ -621,7 +614,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.5.4 Intent-Scoped History / Clean Context")
+    print(" LLM_GPU Chat - v1.5.5 Slot-Aware Context Compression / Minimal Prompt")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
@@ -642,6 +635,7 @@ def print_info(
         print("Min confidence  :", args.min_confidence)
         print("Min agreement   :", args.min_agreement)
         print("Fallback        :", UNKNOWN_REPLY)
+        print("Context policy  : minimal")
     print()
 
 
