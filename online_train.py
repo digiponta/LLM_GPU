@@ -54,6 +54,8 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--manual-weight", type=int, default=4)
     p.add_argument("--recovery-weight", type=int, default=8)
+    p.add_argument("--recovery-stabilization-epochs", type=int, default=6)
+    p.add_argument("--recovery-learning-rate", type=float, default=1e-5)
     p.add_argument("--auto-weight", type=int, default=0)
     p.add_argument(
         "--state",
@@ -347,7 +349,7 @@ def main() -> None:
     )
 
     print("=" * 72)
-    print(" LLM_GPU v1.6.19 Strong Forgetting-Recovery Learning")
+    print(" LLM_GPU v1.6.20 Recovery Stabilization Learning")
     print("=" * 72)
     print("Device          :", device)
     if device.type == "cuda":
@@ -434,6 +436,56 @@ def main() -> None:
 
     model.load_state_dict(best_state)
     model.to(device)
+
+    recovery_stabilization_loss = None
+    if recovery_rows and args.recovery_stabilization_epochs > 0:
+        recovery_ds = ConversationDataset(
+            recovery_rows,
+            tokenizer,
+            model.context_length,
+        )
+        recovery_loader = DataLoader(
+            recovery_ds,
+            batch_size=1,
+            shuffle=True,
+        )
+        recovery_optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=args.recovery_learning_rate,
+            weight_decay=0.01,
+        )
+
+        print()
+        print("Recovery stabilization")
+        print("----------------------")
+        print("Recovery pairs   :", len(recovery_rows))
+        print("Recovery LR      :", args.recovery_learning_rate)
+        print("Recovery epochs  :", args.recovery_stabilization_epochs)
+
+        for recovery_epoch in range(
+            1,
+            args.recovery_stabilization_epochs + 1,
+        ):
+            model.train()
+            total = 0.0
+            batches = 0
+
+            for x, y, mask in recovery_loader:
+                x, y, mask = x.to(device), y.to(device), mask.to(device)
+                recovery_optimizer.zero_grad(set_to_none=True)
+                loss = masked_loss(model, x, y, mask)
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
+                recovery_optimizer.step()
+                total += float(loss.item())
+                batches += 1
+
+            recovery_stabilization_loss = total / max(1, batches)
+            print(
+                f"recovery_epoch={recovery_epoch:02d} "
+                f"loss={recovery_stabilization_loss:.6f}"
+            )
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     model.save_checkpoint(
         str(output_path),
@@ -452,6 +504,8 @@ def main() -> None:
     print("Training completed.")
     print("Best epoch :", best_epoch)
     print("Best metric:", f"{best_val:.6f}", "(train loss in tiny-data mode)" if tiny_mode else "(validation loss)")
+    if recovery_stabilization_loss is not None:
+        print("Recovery loss:", f"{recovery_stabilization_loss:.6f}")
     print("Saved      :", output_path)
     print("State      :", state_path)
     print("Consumed   :", len(pending_rows), "new trusted pair(s)")
