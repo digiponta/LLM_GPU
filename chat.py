@@ -127,6 +127,18 @@ def parse_args() -> argparse.Namespace:
         help="Minimum mean selected-token probability.",
     )
     parser.add_argument(
+        "--min-token-confidence",
+        type=float,
+        default=0.02,
+        help="Minimum probability allowed for any generated token.",
+    )
+    parser.add_argument(
+        "--min-mean-margin",
+        type=float,
+        default=0.01,
+        help="Minimum mean top1-vs-top2 probability margin.",
+    )
+    parser.add_argument(
         "--min-agreement",
         type=float,
         default=0.35,
@@ -1256,6 +1268,8 @@ def evaluate_unknown_gate(
     tokenizer: Tokenizer,
     results: List[GenerationResult],
     min_confidence: float,
+    min_token_confidence: float,
+    min_mean_margin: float,
     min_agreement: float,
     min_semantic_agreement: float,
     allow_semantic_rescue: bool,
@@ -1272,6 +1286,26 @@ def evaluate_unknown_gate(
             0.0,
             0.0,
             "malformed/repetitive output",
+        )
+
+    # v1.6.8 Output Quality Gate: semantic agreement cannot rescue a response
+    # containing a locally very unlikely token sequence.
+    if primary.min_confidence < min_token_confidence:
+        return (
+            False,
+            primary.mean_confidence,
+            0.0,
+            0.0,
+            "low local token confidence",
+        )
+
+    if primary.mean_top2_margin < min_mean_margin:
+        return (
+            False,
+            primary.mean_confidence,
+            0.0,
+            0.0,
+            "low generation margin",
         )
 
     lexical_agreement = mean_pairwise_agreement(results)
@@ -1330,7 +1364,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.6.7 Semantic Probe Agreement + Context-Safe Gate")
+    print(" LLM_GPU Chat - v1.6.8 Output Quality + Semantic Probe Gate")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
@@ -1349,6 +1383,8 @@ def print_info(
     if args.unknown_rejection:
         print("Probe count     :", args.probe_count)
         print("Min confidence  :", args.min_confidence)
+        print("Min token conf  :", args.min_token_confidence)
+        print("Min mean margin :", args.min_mean_margin)
         print("Min agreement   :", args.min_agreement)
         print("Min sem agree   :", args.min_semantic_agreement)
         print("Fallback        :", UNKNOWN_REPLY)
@@ -1650,6 +1686,8 @@ def main() -> None:
                 tokenizer=tokenizer,
                 results=results,
                 min_confidence=args.min_confidence,
+                min_token_confidence=args.min_token_confidence,
+                min_mean_margin=args.min_mean_margin,
                 min_agreement=effective_agreement,
                 min_semantic_agreement=args.min_semantic_agreement,
                 allow_semantic_rescue=(
@@ -1664,8 +1702,9 @@ def main() -> None:
             if not semantic_ok:
                 accepted = False
                 reason = semantic_reason
-            else:
+            elif reason == "accepted":
                 reason = semantic_reason
+            # Preserve diagnostic reasons such as "semantic probe agreement".
 
         reply = primary.text if accepted else UNKNOWN_REPLY
         new_tokens = sum(r.token_count for r in results)
@@ -1697,6 +1736,8 @@ def main() -> None:
             print(
                 f"[gate={status}, "
                 f"confidence={confidence:.3f}, "
+                f"min_tok_conf={primary.min_confidence:.3f}, "
+                f"mean_margin={primary.mean_top2_margin:.3f}, "
                 f"agreement={agreement:.3f}, "
                 f"sem_agreement={semantic_agreement:.3f}"
                 f"{semantic_part}, "
