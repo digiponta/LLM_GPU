@@ -238,6 +238,36 @@ def initialize_learning_state_if_missing(
     return len(fingerprints)
 
 
+def mark_pair_for_retraining(
+    state_path: Path,
+    user_text: str,
+    assistant_text: str,
+) -> bool:
+    if not state_path.exists():
+        return False
+
+    try:
+        data = json.loads(state_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return False
+
+    fingerprints = {
+        str(x) for x in data.get("trained_fingerprints", [])
+    }
+    fp = pair_fingerprint(user_text, assistant_text)
+    if fp not in fingerprints:
+        return False
+
+    fingerprints.remove(fp)
+    data["trained_fingerprints"] = sorted(fingerprints)
+    data["version"] = data.get("version", "v1.6.2")
+    state_path.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return True
+
+
 def choose_startup_model(requested_model: str) -> Path:
     requested = Path(requested_model)
     if requested_model != DEFAULT_MODEL:
@@ -1649,7 +1679,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.6.14 Guided Teaching + Queue Dedup")
+    print(" LLM_GPU Chat - v1.6.15 Forgetting-Aware Retraining")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
@@ -1840,12 +1870,21 @@ def main() -> None:
                     print(f"[teaching rejected: {teaching_reason}]")
                     print(f"[hint: {teaching_hint(last_user_text)}]")
                 else:
+                    reactivated = mark_pair_for_retraining(
+                        learning_state,
+                        last_user_text,
+                        corrected,
+                    )
                     append_learning_pair(
                         learning_log,
                         last_user_text,
                         corrected,
                         source="chat-manual",
                     )
+                    if reactivated:
+                        print(
+                            "[previously trained pair reactivated for retraining]"
+                        )
                     print(
                         f"[manual learning pair saved; "
                         f"pairs={learning_log_count(learning_log)}]"
