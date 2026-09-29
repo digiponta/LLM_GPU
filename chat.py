@@ -478,6 +478,7 @@ def recover_forgotten_pairs_from_queue(
     teaching_queue: Path,
     learning_log: Path,
     learning_state: Path,
+    target_question: str | None = None,
 ) -> tuple[int, int, int, list[tuple[str, str, str]]]:
     if not teaching_queue.exists():
         return 0, 0, 0, []
@@ -498,6 +499,12 @@ def recover_forgotten_pairs_from_queue(
             continue
 
         question = str(row.get("user", "")).strip()
+        if target_question is not None:
+            if (
+                normalize_pair_text(question).lower()
+                != normalize_pair_text(target_question).lower()
+            ):
+                continue
         qn = normalize_pair_text(question).lower()
         if question and qn not in seen_questions:
             seen_questions.add(qn)
@@ -1871,7 +1878,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.6.23 Recovery Teacher Diagnostics")
+    print(" LLM_GPU Chat - v1.6.24 Targeted Recovery Routing")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
@@ -1966,7 +1973,8 @@ def main() -> None:
     print("  /teach TEXT   save a corrected answer for the previous user turn")
     print("  /good         approve and save the previous AI answer for learning")
     print("  /train        run incremental training and reload checkpoint")
-    print("  /maintain     reactivate forgotten trusted pairs from teaching queue")
+    print("  /maintain     recover the previous question from trusted teaching data")
+    print("  /maintain all recover all pending trusted teaching candidates")
     print("  /exit         quit")
     print()
 
@@ -2102,11 +2110,21 @@ def main() -> None:
             print()
             continue
 
-        if command == "/maintain":
+        if command in ("/maintain", "/maintain all"):
+            target_question = (
+                None if command == "/maintain all"
+                else last_user_text
+            )
+            if command == "/maintain" and target_question is None:
+                print("[no previous user turn to maintain]")
+                print()
+                continue
+
             matched, reactivated, rejected_old, selections = recover_forgotten_pairs_from_queue(
                 Path(args.teaching_queue),
                 learning_log,
                 learning_state,
+                target_question=target_question,
             )
             print(
                 f"[maintenance matched={matched}, "
@@ -2124,12 +2142,17 @@ def main() -> None:
                         f"[recovery selected: {queued_question} -> NONE "
                         f"({detail})]"
                     )
+                    print("[recovery status=NEEDS_TEACHING]")
+                    print(f"[hint: {teaching_hint(queued_question)}]")
+
             if reactivated:
                 print("[run /train to relearn reactivated trusted pairs]")
             elif matched:
                 print("[matched trusted pairs are already pending or current]")
+            elif selections:
+                print("[no valid trusted teacher; use /teach before /train]")
             else:
-                print("[no trusted teaching-queue match found]")
+                print("[no pending teaching candidate for maintenance]")
             print()
             continue
 
