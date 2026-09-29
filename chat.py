@@ -1,20 +1,27 @@
 # chat.py
 #
 # Interactive chat interface for the current LLM_GPU conversational checkpoint.
-# Defaults to the v0.8 cleaned chat model used by the v1.4/v1.5 semantic experiments.
+# Defaults to the v0.8 cleaned chat model used by the v1.4/v1.5 experiments.
 #
-# Features:
-#   - CUDA / CPU auto-selection
-#   - short multi-turn history
-#   - conservative sampling for the small model
-#   - response-only repetition penalty
-#   - newline / EOS stop
-#   - /reset, /info, /exit commands
+# v1.5.1 additions:
+#   - conservative chat-level Unknown rejection
+#   - multiple probe generations
+#   - token-confidence / response-agreement checks
+#   - malformed / repetitive output detection
+#   - fallback response: "未学習です"
+#
+# Note:
+# The v1.4.32/v1.5.1 semantic risk predictors are contrast-routing specific.
+# They cannot be applied directly to arbitrary chat prompts.  This file uses
+# a chat-level conservative rejection gate inspired by the same selective
+# prediction principle.
 
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 from pathlib import Path
+import re
 import time
 from typing import List, Tuple
 
@@ -30,6 +37,16 @@ DEFAULT_MODEL = "model/model-gpu-v0.8-chat-clean.pt"
 
 USER_PREFIX = "人: "
 AI_PREFIX = "AI: "
+UNKNOWN_REPLY = "未学習です"
+
+
+@dataclass
+class GenerationResult:
+    text: str
+    token_count: int
+    mean_confidence: float
+    min_confidence: float
+    mean_top2_margin: float
 
 
 def parse_args() -> argparse.Namespace:
@@ -47,6 +64,50 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=3,
         help="Number of previous turns included in the prompt.",
+    )
+
+    # Conservative selective-prediction gate.
+    parser.add_argument(
+        "--unknown-rejection",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable conservative chat-level Unknown rejection.",
+    )
+    parser.add_argument(
+        "--probe-count",
+        type=int,
+        default=3,
+        help="Number of generation probes used for agreement.",
+    )
+    parser.add_argument(
+        "--probe-temperature",
+        type=float,
+        default=0.30,
+        help="Sampling temperature for reliability probes.",
+    )
+    parser.add_argument(
+        "--probe-top-k",
+        type=int,
+        default=10,
+        help="Top-k used for reliability probes.",
+    )
+    parser.add_argument(
+        "--min-confidence",
+        type=float,
+        default=0.18,
+        help="Minimum mean selected-token probability.",
+    )
+    parser.add_argument(
+        "--min-agreement",
+        type=float,
+        default=0.35,
+        help="Minimum mean textual agreement between probe responses.",
+    )
+    parser.add_argument(
+        "--show-risk",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Show confidence/agreement diagnostics.",
     )
     return parser.parse_args()
 
@@ -69,6 +130,13 @@ def build_prompt(
     return "".join(chunks)
 
 
+def _clean_reply(reply: str) -> str:
+    for marker in ("\n人:", "\nAI:", "\n"):
+        if marker in reply:
+            reply = reply.split(marker, 1)[0]
+    return reply.strip()
+
+
 @torch.no_grad()
 def generate_reply(
     model: LanguageModel,
@@ -78,10 +146,19 @@ def generate_reply(
     temperature: float,
     top_k: int,
     repetition_penalty: float,
-) -> Tuple[str, int]:
+    seed: int | None = None,
+) -> GenerationResult:
+    if seed is not None:
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+
     prompt_ids = tokenizer.encode(prompt, add_bos=True)
     generated = list(prompt_ids)
     response_ids: List[int] = []
+
+    confidences: List[float] = []
+    margins: List[float] = []
 
     model.eval()
     device = next(model.parameters()).device
@@ -94,22 +171,24 @@ def generate_reply(
             device=device,
         )
 
-        logits = model(x)[0, -1, :].clone()
+        raw_logits = model(x)[0, -1, :].clone()
 
-        # Penalize only tokens already emitted in the assistant response.
         if repetition_penalty != 1.0:
             for token_id in set(response_ids):
-                if 0 <= token_id < logits.numel():
-                    if logits[token_id] >= 0:
-                        logits[token_id] /= repetition_penalty
+                if 0 <= token_id < raw_logits.numel():
+                    if raw_logits[token_id] >= 0:
+                        raw_logits[token_id] /= repetition_penalty
                     else:
-                        logits[token_id] *= repetition_penalty
+                        raw_logits[token_id] *= repetition_penalty
+
+        # Confidence is always measured on the untempered model distribution.
+        raw_probs = F.softmax(raw_logits, dim=-1)
+        top2_values, _ = torch.topk(raw_probs, k=2)
 
         if temperature <= 0:
-            next_id = int(torch.argmax(logits).item())
+            next_id = int(torch.argmax(raw_logits).item())
         else:
-            logits = logits / temperature
-
+            logits = raw_logits / temperature
             if 0 < top_k < logits.numel():
                 values, indices = torch.topk(logits, top_k)
                 probs = F.softmax(values, dim=-1)
@@ -122,6 +201,9 @@ def generate_reply(
         if next_id == tokenizer.eos_id:
             break
 
+        confidences.append(float(raw_probs[next_id].item()))
+        margins.append(float((top2_values[0] - top2_values[1]).item()))
+
         generated.append(next_id)
         response_ids.append(next_id)
 
@@ -129,8 +211,6 @@ def generate_reply(
             response_ids,
             skip_special_tokens=True,
         )
-
-        # Stop at the end of the first assistant line.
         if "\n" in decoded:
             break
 
@@ -138,12 +218,121 @@ def generate_reply(
         response_ids,
         skip_special_tokens=True,
     )
+    reply = _clean_reply(reply)
 
-    for marker in ("\n人:", "\nAI:", "\n"):
-        if marker in reply:
-            reply = reply.split(marker, 1)[0]
+    mean_conf = (
+        sum(confidences) / len(confidences)
+        if confidences else 0.0
+    )
+    min_conf = min(confidences) if confidences else 0.0
+    mean_margin = (
+        sum(margins) / len(margins)
+        if margins else 0.0
+    )
 
-    return reply.strip(), len(response_ids)
+    return GenerationResult(
+        text=reply,
+        token_count=len(response_ids),
+        mean_confidence=mean_conf,
+        min_confidence=min_conf,
+        mean_top2_margin=mean_margin,
+    )
+
+
+def _normalize_for_similarity(text: str) -> str:
+    text = text.lower()
+    text = re.sub(r"\s+", "", text)
+    text = re.sub(r"[。、,.!?！？:：;；「」『』（）()\[\]{}]", "", text)
+    return text
+
+
+def _char_ngrams(text: str, n: int = 2) -> set[str]:
+    text = _normalize_for_similarity(text)
+    if not text:
+        return set()
+    if len(text) < n:
+        return {text}
+    return {text[i:i+n] for i in range(len(text)-n+1)}
+
+
+def response_similarity(a: str, b: str) -> float:
+    aa = _char_ngrams(a)
+    bb = _char_ngrams(b)
+    if not aa and not bb:
+        return 1.0
+    if not aa or not bb:
+        return 0.0
+    return len(aa & bb) / len(aa | bb)
+
+
+def mean_pairwise_agreement(results: List[GenerationResult]) -> float:
+    if len(results) < 2:
+        return 1.0
+    values: List[float] = []
+    for i in range(len(results)):
+        for j in range(i+1, len(results)):
+            values.append(
+                response_similarity(results[i].text, results[j].text)
+            )
+    return sum(values) / len(values) if values else 1.0
+
+
+def malformed_or_unstable(text: str) -> bool:
+    if not text:
+        return True
+
+    # Unicode replacement character is a strong malformed-output signal.
+    if "�" in text:
+        return True
+
+    # Reject pathological character/token repetition.
+    compact = _normalize_for_similarity(text)
+    if len(compact) >= 8:
+        for n in (1, 2, 3, 4):
+            chunks = [
+                compact[i:i+n]
+                for i in range(0, len(compact)-n+1)
+            ]
+            if chunks:
+                most = max(chunks.count(x) for x in set(chunks))
+                if most / len(chunks) > 0.45:
+                    return True
+
+    return False
+
+
+def evaluate_unknown_gate(
+    results: List[GenerationResult],
+    min_confidence: float,
+    min_agreement: float,
+) -> Tuple[bool, float, float, str]:
+    if not results:
+        return False, 0.0, 0.0, "no generation"
+
+    primary = results[0]
+
+    if malformed_or_unstable(primary.text):
+        return False, primary.mean_confidence, 0.0, "malformed/repetitive output"
+
+    agreement = mean_pairwise_agreement(results)
+
+    if primary.mean_confidence < min_confidence:
+        return (
+            False,
+            primary.mean_confidence,
+            agreement,
+            "low token confidence",
+        )
+
+    if agreement < min_agreement:
+        return (
+            False,
+            primary.mean_confidence,
+            agreement,
+            "low response agreement",
+        )
+
+    return True, primary.mean_confidence, agreement, "accepted"
 
 
 def print_info(
@@ -153,10 +342,11 @@ def print_info(
     device: torch.device,
     model_path: Path,
     tokenizer_path: Path,
+    args: argparse.Namespace,
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - current v1.5.x experiment base")
+    print(" LLM_GPU Chat - v1.5.1 + Unknown Rejection")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
@@ -171,6 +361,12 @@ def print_info(
     print("Attention heads :", model.num_heads)
     print("Checkpoint epoch:", checkpoint.get("epoch"))
     print("Checkpoint loss :", checkpoint.get("loss"))
+    print("Unknown reject  :", args.unknown_rejection)
+    if args.unknown_rejection:
+        print("Probe count     :", args.probe_count)
+        print("Min confidence  :", args.min_confidence)
+        print("Min agreement   :", args.min_agreement)
+        print("Fallback        :", UNKNOWN_REPLY)
     print()
 
 
@@ -214,6 +410,7 @@ def main() -> None:
         device=device,
         model_path=model_path,
         tokenizer_path=tokenizer_path,
+        args=args,
     )
 
     print("Commands:")
@@ -253,6 +450,7 @@ def main() -> None:
                 device=device,
                 model_path=model_path,
                 tokenizer_path=tokenizer_path,
+                args=args,
             )
             continue
 
@@ -264,15 +462,53 @@ def main() -> None:
 
         start = time.perf_counter()
 
-        reply, new_tokens = generate_reply(
-            model=model,
-            tokenizer=tokenizer,
-            prompt=prompt,
-            max_new_tokens=args.max_new_tokens,
-            temperature=args.temperature,
-            top_k=args.top_k,
-            repetition_penalty=args.repetition_penalty,
-        )
+        # Primary response: greedy when rejection is enabled so that the
+        # displayed candidate itself is deterministic and reproducible.
+        primary_temperature = 0.0 if args.unknown_rejection else args.temperature
+        results = [
+            generate_reply(
+                model=model,
+                tokenizer=tokenizer,
+                prompt=prompt,
+                max_new_tokens=args.max_new_tokens,
+                temperature=primary_temperature,
+                top_k=args.top_k,
+                repetition_penalty=args.repetition_penalty,
+                seed=0,
+            )
+        ]
+
+        if args.unknown_rejection:
+            for probe in range(max(0, args.probe_count - 1)):
+                results.append(
+                    generate_reply(
+                        model=model,
+                        tokenizer=tokenizer,
+                        prompt=prompt,
+                        max_new_tokens=args.max_new_tokens,
+                        temperature=args.probe_temperature,
+                        top_k=args.probe_top_k,
+                        repetition_penalty=args.repetition_penalty,
+                        seed=1000 + probe,
+                    )
+                )
+
+        primary = results[0]
+
+        accepted = True
+        confidence = primary.mean_confidence
+        agreement = 1.0
+        reason = "rejection disabled"
+
+        if args.unknown_rejection:
+            accepted, confidence, agreement, reason = evaluate_unknown_gate(
+                results,
+                min_confidence=args.min_confidence,
+                min_agreement=args.min_agreement,
+            )
+
+        reply = primary.text if accepted else UNKNOWN_REPLY
+        new_tokens = sum(r.token_count for r in results)
 
         if device.type == "cuda":
             torch.cuda.synchronize()
@@ -281,16 +517,28 @@ def main() -> None:
         rate = new_tokens / elapsed if elapsed > 0 else 0.0
 
         if not reply:
-            reply = "(no response)"
+            reply = UNKNOWN_REPLY if args.unknown_rejection else "(no response)"
 
         print(f"AI> {reply}")
+
+        if args.show_risk and args.unknown_rejection:
+            status = "KNOWN" if accepted else "UNKNOWN"
+            print(
+                f"[gate={status}, "
+                f"confidence={confidence:.3f}, "
+                f"agreement={agreement:.3f}, "
+                f"reason={reason}]"
+            )
+
         print(
-            f"[{new_tokens} tokens, "
+            f"[{new_tokens} generated probe tokens, "
             f"{elapsed:.2f}s, "
             f"{rate:.1f} tok/s]"
         )
         print()
 
+        # Do not contaminate subsequent context with a rejected hallucination.
+        # Record only the conservative fallback response.
         history.append((user_text, reply))
 
 
