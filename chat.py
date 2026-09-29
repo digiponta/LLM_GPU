@@ -3,7 +3,7 @@
 # Interactive chat interface for the current LLM_GPU conversational checkpoint.
 # Defaults to the v0.8 cleaned chat model used by the v1.4/v1.5 experiments.
 #
-# v1.5.5 additions:
+# v1.5.7 additions:
 #   - conservative chat-level Unknown rejection
 #   - multiple probe generations
 #   - token-confidence / response-agreement checks
@@ -400,17 +400,70 @@ def semantic_vector(
     return F.normalize(v, dim=0)
 
 
+SLOT_ALIASES = {
+    "ai": ("ai", "人工知能", "artificial intelligence"),
+    "llm": ("llm", "大規模言語モデル", "large language model", "言語モデル"),
+    "cpu": ("cpu", "中央処理装置", "central processing unit"),
+    "gpu": ("gpu", "画像処理装置", "graphics processing unit"),
+    "cuda": ("cuda",),
+}
+
+KNOWN_ENTITY_TOKENS = {
+    "AI", "LLM", "CPU", "GPU", "CUDA",
+}
+
+
+def _clean_slot(slot: str) -> str:
+    slot = slot.strip()
+    slot = re.sub(r"(?:を|は|が|の)$", "", slot)
+    return slot.strip()
+
+
+def slot_aliases(slot: str) -> tuple[str, ...]:
+    key = _clean_slot(slot).lower()
+    return SLOT_ALIASES.get(key, (key,))
+
+
+def slot_present(slot: str, answer: str) -> bool:
+    answer_lower = answer.lower()
+    return any(alias.lower() in answer_lower for alias in slot_aliases(slot))
+
+
+def extract_suspicious_entities(text: str) -> list[str]:
+    """Extract novel-looking identifiers whose identity should survive generation."""
+    candidates = re.findall(r"[A-Za-z][A-Za-z0-9_+.#-]{1,39}", text)
+    entities: list[str] = []
+    for token in candidates:
+        upper = token.upper()
+        if upper in KNOWN_ENTITY_TOKENS:
+            continue
+
+        # Conservative: require digits/hyphen, or mixed-case identifier shape.
+        suspicious = (
+            any(ch.isdigit() for ch in token)
+            or "-" in token
+            or (
+                any(ch.islower() for ch in token)
+                and any(ch.isupper() for ch in token[1:])
+                and len(token) >= 5
+            )
+        )
+        if suspicious and token not in entities:
+            entities.append(token)
+    return entities
+
+
 def extract_definition_focus(text: str) -> str | None:
-    """Extract focus from short Japanese definition prompts such as 'GPUとは'."""
+    """Extract focus from Japanese definition prompts such as 'GPUとは'."""
     compact = text.strip()
     patterns = [
-        r"^\s*([A-Za-z0-9_+.#\-]{2,20})\s*(?:とは|って|とは何|って何)",
-        r"^\s*([^\s、。！？?]{1,20})\s*(?:とは|って)\s*[？?]?$",
+        r"^\s*([A-Za-z0-9_+.#\-]{2,40})\s*(?:とは|って|とは何|って何)",
+        r"^\s*([^\s、。！？?]{1,40})\s*(?:とは|って)\s*[？?]?$",
     ]
     for p in patterns:
         m = re.search(p, compact, flags=re.IGNORECASE)
         if m:
-            return m.group(1).strip()
+            return _clean_slot(m.group(1))
     return None
 
 
@@ -428,12 +481,15 @@ def classify_intent_and_slots(question: str) -> tuple[str, list[str]]:
     # Comparison: "AとBの違い", "AとBを比較", "AとBの差"
     m = re.search(
         r"^\s*([^\s、。！？?と]{1,30})\s*と\s*([^\s、。！？?]{1,30}?)"
-        r"\s*(?:の)?(?:違い|差|比較|違う点)",
+        r"\s*(?:を|の)?(?:違い|差|比較|違う点)",
         q,
         flags=re.IGNORECASE,
     )
     if m:
-        return "comparison", [m.group(1).strip(), m.group(2).strip()]
+        return "comparison", [
+            _clean_slot(m.group(1)),
+            _clean_slot(m.group(2)),
+        ]
 
     focus = extract_definition_focus(q)
     if focus:
@@ -464,8 +520,7 @@ def slot_coverage_check(
     if not slots:
         return True, 1.0, "no required slots"
 
-    answer_lower = answer.lower()
-    hits = [slot for slot in slots if slot.lower() in answer_lower]
+    hits = [slot for slot in slots if slot_present(slot, answer)]
     coverage = len(hits) / len(slots)
 
     if intent == "definition":
@@ -475,7 +530,7 @@ def slot_coverage_check(
 
     if intent == "comparison":
         if coverage < 1.0:
-            missing = [s for s in slots if s.lower() not in answer_lower]
+            missing = [s for s in slots if not slot_present(s, answer)]
             return (
                 False,
                 coverage,
@@ -518,6 +573,19 @@ def semantic_consistency_check(
     contamination_margin: float,
 ) -> tuple[bool, float, float, str, str, list[str], float]:
     intent, slots = classify_intent_and_slots(current_question)
+
+    suspicious_entities = extract_suspicious_entities(current_question)
+    missing_entities = [
+        entity
+        for entity in suspicious_entities
+        if entity.lower() not in answer.lower()
+    ]
+    if missing_entities:
+        return (
+            False, 0.0, 0.0,
+            "unknown entity missing: " + ", ".join(missing_entities),
+            intent, slots, 0.0,
+        )
 
     slots_ok, slot_coverage, slot_reason = slot_coverage_check(
         intent, slots, answer
@@ -614,7 +682,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.5.5 Slot-Aware Context Compression / Minimal Prompt")
+    print(" LLM_GPU Chat - v1.5.7 Robust Slot Parsing / Unknown Entity Gate")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
