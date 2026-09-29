@@ -1846,7 +1846,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.6.19 Strong Forgetting Recovery")
+    print(" LLM_GPU Chat - v1.6.20 Recovery Stabilization")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
