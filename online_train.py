@@ -1,6 +1,6 @@
 # online_train.py
 #
-# LLM_GPU v1.6.1 manual-teaching-priority conversational learning.
+# LLM_GPU v1.6.2 deduplicated incremental-only conversational learning.
 #
 # - Reads accepted/manual dialogue pairs saved by chat.py as JSONL.
 # - Replays the existing conversation corpus to reduce catastrophic forgetting.
@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import hashlib
 import math
 import random
 import time
@@ -33,13 +34,13 @@ SEED = 42
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Manual-teaching-priority conversational training for LLM_GPU v1.6.1."
+        description="Deduplicated incremental-only conversational training for LLM_GPU v1.6.2."
     )
     p.add_argument("--chat-data", default="data/chat_history.jsonl")
     p.add_argument("--replay-data", default="data/conversation-ja.txt")
     p.add_argument("--tokenizer", default="model/tokenizer-v0.7-bpe.json")
     p.add_argument("--base-model", default="model/model-gpu-v0.8-chat-clean.pt")
-    p.add_argument("--output", default="model/model-gpu-v1.6.1-online.pt")
+    p.add_argument("--output", default="model/model-gpu-v1.6.2-online.pt")
     p.add_argument("--epochs", type=int, default=8)
     p.add_argument("--learning-rate", type=float, default=3e-5)
     p.add_argument("--batch-size", type=int, default=8)
@@ -51,9 +52,20 @@ def parse_args() -> argparse.Namespace:
         default=1.0,
         help="Replay pairs per new chat pair.",
     )
-    p.add_argument("--manual-weight", type=int, default=8)
+    p.add_argument("--manual-weight", type=int, default=4)
     p.add_argument("--auto-weight", type=int, default=0)
-    p.add_argument("--replay-weight", type=int, default=2)
+    p.add_argument(
+        "--state",
+        default="data/chat_learning_state.json",
+        help="Persistent fingerprints of trusted pairs already consumed by training.",
+    )
+    p.add_argument(
+        "--trusted-replay-weight",
+        type=int,
+        default=1,
+        help="Weak replay weight for previously trained trusted pairs.",
+    )
+    p.add_argument("--replay-weight", type=int, default=1)
     p.add_argument(
         "--tiny-threshold",
         type=int,
@@ -81,6 +93,51 @@ def load_chat_jsonl(path: Path) -> List[Tuple[str, str, str]]:
             pairs.append((user, answer, source))
     return pairs
 
+
+
+def normalize_pair_text(text: str) -> str:
+    return " ".join(text.strip().split())
+
+
+def pair_fingerprint(user: str, answer: str) -> str:
+    payload = normalize_pair_text(user) + "\n" + normalize_pair_text(answer)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def deduplicate_trusted_rows(
+    rows: List[Tuple[str, str, str]],
+) -> List[Tuple[str, str, str]]:
+    seen: set[str] = set()
+    unique: List[Tuple[str, str, str]] = []
+    for user, answer, source in rows:
+        if source not in ("chat-manual", "chat-approved"):
+            continue
+        fp = pair_fingerprint(user, answer)
+        if fp in seen:
+            continue
+        seen.add(fp)
+        unique.append((user, answer, source))
+    return unique
+
+
+def load_training_state(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
+    data = json.loads(path.read_text(encoding="utf-8"))
+    values = data.get("trained_fingerprints", [])
+    return {str(x) for x in values}
+
+
+def save_training_state(path: Path, fingerprints: set[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "version": "v1.6.2",
+        "trained_fingerprints": sorted(fingerprints),
+    }
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 def load_replay_pairs(path: Path) -> List[Tuple[str, str]]:
     if not path.exists():
@@ -194,8 +251,25 @@ def main() -> None:
     if len(new_rows) < 1:
         raise ValueError("At least 1 chat learning pair is required.")
 
-    manual_rows = [(u, a) for u, a, s in new_rows if s == "chat-manual"]
-    approved_rows = [(u, a) for u, a, s in new_rows if s == "chat-approved"]
+    state_path = Path(args.state)
+    trained_fingerprints = load_training_state(state_path)
+    trusted_rows = deduplicate_trusted_rows(new_rows)
+
+    pending_rows = [
+        row for row in trusted_rows
+        if pair_fingerprint(row[0], row[1]) not in trained_fingerprints
+    ]
+    historical_rows = [
+        row for row in trusted_rows
+        if pair_fingerprint(row[0], row[1]) in trained_fingerprints
+    ]
+
+    if not pending_rows:
+        print("No new trusted learning pairs. Incremental training skipped.")
+        raise SystemExit(3)
+
+    manual_rows = [(u, a) for u, a, s in pending_rows if s == "chat-manual"]
+    approved_rows = [(u, a) for u, a, s in pending_rows if s == "chat-approved"]
     auto_rows = [(u, a) for u, a, s in new_rows if s not in ("chat-manual", "chat-approved")]
 
     weighted_new_pairs: List[Tuple[str, str]] = []
@@ -203,8 +277,12 @@ def main() -> None:
         weighted_new_pairs.extend([pair] * max(1, args.manual_weight))
     for pair in approved_rows:
         weighted_new_pairs.extend([pair] * max(1, args.manual_weight))
-    for pair in auto_rows:
-        weighted_new_pairs.extend([pair] * max(0, args.auto_weight))
+
+    trusted_replay: List[Tuple[str, str]] = []
+    for user, answer, _ in historical_rows:
+        trusted_replay.extend(
+            [(user, answer)] * max(0, args.trusted_replay_weight)
+        )
 
     replay = load_replay_pairs(replay_path)
     replay_count = min(
@@ -217,7 +295,7 @@ def main() -> None:
     for pair in replay_pairs:
         weighted_replay.extend([pair] * max(1, args.replay_weight))
 
-    pairs = list(weighted_new_pairs) + weighted_replay
+    pairs = list(weighted_new_pairs) + trusted_replay + weighted_replay
     random.shuffle(pairs)
 
     tokenizer = Tokenizer.load(str(tokenizer_path))
@@ -229,7 +307,7 @@ def main() -> None:
             f"{tokenizer.vocab_size} != {model.vocab_size}"
         )
 
-    tiny_mode = len(new_rows) < args.tiny_threshold
+    tiny_mode = len(pending_rows) < args.tiny_threshold
     if tiny_mode:
         val_pairs: List[Tuple[str, str]] = []
         train_pairs = pairs
@@ -254,18 +332,21 @@ def main() -> None:
     )
 
     print("=" * 72)
-    print(" LLM_GPU v1.6.1 Manual Teaching Priority Learning")
+    print(" LLM_GPU v1.6.2 Deduplicated Incremental-Only Learning")
     print("=" * 72)
     print("Device          :", device)
     if device.type == "cuda":
         print("GPU             :", torch.cuda.get_device_name(0))
     print("Base model      :", base_path)
     print("Base loss       :", checkpoint.get("loss"))
-    print("New chat pairs  :", len(new_rows))
-    print("Manual pairs    :", len(manual_rows), f"(x{args.manual_weight})")
-    print("Approved pairs  :", len(approved_rows), f"(x{args.manual_weight})")
-    print("Legacy auto     :", len(auto_rows), f"(x{args.auto_weight})")
-    print("Replay pairs    :", replay_count, f"(x{args.replay_weight})")
+    print("Chat log rows   :", len(new_rows))
+    print("Unique trusted  :", len(trusted_rows))
+    print("New trusted     :", len(pending_rows))
+    print("Prior trusted   :", len(historical_rows), f"(x{args.trusted_replay_weight})")
+    print("Manual new      :", len(manual_rows), f"(x{args.manual_weight})")
+    print("Approved new    :", len(approved_rows), f"(x{args.manual_weight})")
+    print("Legacy auto     :", len(auto_rows), "(ignored)")
+    print("Corpus replay   :", replay_count, f"(x{args.replay_weight})")
     print("Tiny-data mode  :", tiny_mode)
     print("Train pairs     :", len(train_pairs))
     print("Validation pairs:", len(val_pairs))
@@ -344,11 +425,19 @@ def main() -> None:
         loss=best_val,
     )
 
+    trained_fingerprints.update(
+        pair_fingerprint(user, answer)
+        for user, answer, _ in pending_rows
+    )
+    save_training_state(state_path, trained_fingerprints)
+
     print()
     print("Training completed.")
     print("Best epoch :", best_epoch)
     print("Best metric:", f"{best_val:.6f}", "(train loss in tiny-data mode)" if tiny_mode else "(validation loss)")
     print("Saved      :", output_path)
+    print("State      :", state_path)
+    print("Consumed   :", len(pending_rows), "new trusted pair(s)")
 
 
 if __name__ == "__main__":
