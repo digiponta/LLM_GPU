@@ -1846,7 +1846,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.6.20 Recovery Stabilization")
+    print(" LLM_GPU Chat - v1.6.21 Rejected-Candidate Diagnostics")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
@@ -2284,6 +2284,9 @@ def main() -> None:
             reply = UNKNOWN_REPLY if args.unknown_rejection else "(no response)"
 
         print(f"AI> {reply}")
+
+        if args.show_risk and args.unknown_rejection and not accepted:
+            print(f"[candidate={primary.text}]")
 
         if args.show_risk and args.unknown_rejection:
             status = "KNOWN" if accepted else "UNKNOWN"
