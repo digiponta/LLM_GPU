@@ -192,11 +192,16 @@ def trusted_fingerprints_from_log(path: Path) -> set[str]:
 def initialize_learning_state_if_missing(
     state_path: Path,
     learning_log: Path,
+    assume_existing_trained: bool,
 ) -> int:
     if state_path.exists():
         return 0
 
-    fingerprints = trusted_fingerprints_from_log(learning_log)
+    fingerprints = (
+        trusted_fingerprints_from_log(learning_log)
+        if assume_existing_trained
+        else set()
+    )
     state_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "version": "v1.6.2",
@@ -1187,6 +1192,9 @@ def main() -> None:
     baseline_count = initialize_learning_state_if_missing(
         learning_state,
         learning_log,
+        assume_existing_trained=(
+            model_path != Path(DEFAULT_MODEL)
+        ),
     )
     if baseline_count:
         print(
