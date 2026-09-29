@@ -52,7 +52,7 @@ def parse_args() -> argparse.Namespace:
         help="Replay pairs per new chat pair.",
     )
     p.add_argument("--manual-weight", type=int, default=8)
-    p.add_argument("--auto-weight", type=int, default=1)
+    p.add_argument("--auto-weight", type=int, default=0)
     p.add_argument("--replay-weight", type=int, default=2)
     p.add_argument(
         "--tiny-threshold",
@@ -195,13 +195,16 @@ def main() -> None:
         raise ValueError("At least 1 chat learning pair is required.")
 
     manual_rows = [(u, a) for u, a, s in new_rows if s == "chat-manual"]
-    auto_rows = [(u, a) for u, a, s in new_rows if s != "chat-manual"]
+    approved_rows = [(u, a) for u, a, s in new_rows if s == "chat-approved"]
+    auto_rows = [(u, a) for u, a, s in new_rows if s not in ("chat-manual", "chat-approved")]
 
     weighted_new_pairs: List[Tuple[str, str]] = []
     for pair in manual_rows:
         weighted_new_pairs.extend([pair] * max(1, args.manual_weight))
+    for pair in approved_rows:
+        weighted_new_pairs.extend([pair] * max(1, args.manual_weight))
     for pair in auto_rows:
-        weighted_new_pairs.extend([pair] * max(1, args.auto_weight))
+        weighted_new_pairs.extend([pair] * max(0, args.auto_weight))
 
     replay = load_replay_pairs(replay_path)
     replay_count = min(
@@ -260,7 +263,8 @@ def main() -> None:
     print("Base loss       :", checkpoint.get("loss"))
     print("New chat pairs  :", len(new_rows))
     print("Manual pairs    :", len(manual_rows), f"(x{args.manual_weight})")
-    print("Auto pairs      :", len(auto_rows), f"(x{args.auto_weight})")
+    print("Approved pairs  :", len(approved_rows), f"(x{args.manual_weight})")
+    print("Legacy auto     :", len(auto_rows), f"(x{args.auto_weight})")
     print("Replay pairs    :", replay_count, f"(x{args.replay_weight})")
     print("Tiny-data mode  :", tiny_mode)
     print("Train pairs     :", len(train_pairs))
