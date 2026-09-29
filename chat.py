@@ -75,27 +75,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--temperature", type=float, default=0.45)
     parser.add_argument("--top-k", type=int, default=20)
     parser.add_argument("--repetition-penalty", type=float, default=1.05)
-    parser.add_argument(
-        "--learning-log",
-        default=DEFAULT_LEARNING_LOG,
-        help="JSONL file used to accumulate chat learning pairs.",
-    )
+    parser.add_argument("--learning-log", default=DEFAULT_LEARNING_LOG)
     parser.add_argument(
         "--learn",
         action=argparse.BooleanOptionalAction,
         default=False,
         help="Start with accepted-turn learning capture enabled.",
     )
-    parser.add_argument(
-        "--online-trainer",
-        default=DEFAULT_ONLINE_TRAINER,
-        help="Training script invoked by /train.",
-    )
-    parser.add_argument(
-        "--online-output",
-        default=DEFAULT_ONLINE_MODEL,
-        help="Checkpoint written by /train.",
-    )
+    parser.add_argument("--online-trainer", default=DEFAULT_ONLINE_TRAINER)
+    parser.add_argument("--online-output", default=DEFAULT_ONLINE_MODEL)
     parser.add_argument(
         "--history-turns",
         type=int,
@@ -164,6 +152,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+
 def append_learning_pair(
     path: Path,
     user_text: str,
@@ -184,12 +173,8 @@ def append_learning_pair(
 def learning_log_count(path: Path) -> int:
     if not path.exists():
         return 0
-    count = 0
     with path.open("r", encoding="utf-8") as f:
-        for line in f:
-            if line.strip():
-                count += 1
-    return count
+        return sum(1 for line in f if line.strip())
 
 
 def run_online_training(
@@ -225,7 +210,6 @@ def run_online_training(
         print(f"[training finished but checkpoint not found: {output}]")
         return None
     return output
-
 
 def _slot_overlap(a: list[str], b: list[str]) -> bool:
     aa = {x.lower() for x in a}
@@ -1117,7 +1101,7 @@ def main() -> None:
     print("  /learn off    stop capture")
     print("  /learn status show capture state and saved-pair count")
     print("  /teach TEXT   save a corrected answer for the previous user turn")
-    print("  /train        run low-LR incremental training and reload checkpoint")
+    print("  /train        run incremental training and reload checkpoint")
     print("  /exit         quit")
     print()
 
