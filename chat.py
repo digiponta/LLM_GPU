@@ -104,6 +104,21 @@ def parse_args() -> argparse.Namespace:
         help="Minimum mean textual agreement between probe responses.",
     )
     parser.add_argument(
+        "--semantic-consistency",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable question-answer semantic consistency checks.",
+    )
+    parser.add_argument(
+        "--history-contamination-margin",
+        type=float,
+        default=0.05,
+        help=(
+            "Reject if the answer is closer to a previous user turn than "
+            "the current turn by this cosine-similarity margin."
+        ),
+    )
+    parser.add_argument(
         "--show-risk",
         action=argparse.BooleanOptionalAction,
         default=True,
