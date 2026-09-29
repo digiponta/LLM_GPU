@@ -445,6 +445,90 @@ def learning_log_count(path: Path) -> int:
         return sum(1 for line in f if line.strip())
 
 
+def trusted_pairs_from_log(path: Path) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    if not path.exists():
+        return pairs
+
+    seen: set[str] = set()
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        if not raw.strip():
+            continue
+        try:
+            row = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if str(row.get("source", "")) not in ("chat-manual", "chat-approved"):
+            continue
+        user = str(row.get("user", "")).strip()
+        answer = str(row.get("assistant", "")).strip()
+        if not user or not answer:
+            continue
+        fp = pair_fingerprint(user, answer)
+        if fp in seen:
+            continue
+        seen.add(fp)
+        pairs.append((user, answer))
+    return pairs
+
+
+def recover_forgotten_pairs_from_queue(
+    teaching_queue: Path,
+    learning_log: Path,
+    learning_state: Path,
+) -> tuple[int, int]:
+    if not teaching_queue.exists():
+        return 0, 0
+
+    queued_questions: list[str] = []
+    for raw in teaching_queue.read_text(encoding="utf-8").splitlines():
+        if not raw.strip():
+            continue
+        try:
+            row = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if str(row.get("resolution", "")) != "LEARNING_GAP":
+            continue
+        question = str(row.get("user", "")).strip()
+        if question:
+            queued_questions.append(question)
+
+    if not queued_questions:
+        return 0, 0
+
+    trusted_pairs = trusted_pairs_from_log(learning_log)
+    reactivated = 0
+    matched = 0
+
+    for question in queued_questions:
+        qn = normalize_pair_text(question).lower()
+        best: tuple[str, str] | None = None
+        best_score = 0.0
+
+        for user, answer in trusted_pairs:
+            un = normalize_pair_text(user).lower()
+            score = response_similarity(qn, un)
+            if qn == un:
+                score = 1.0
+            if score > best_score:
+                best_score = score
+                best = (user, answer)
+
+        if best is None or best_score < 0.80:
+            continue
+
+        matched += 1
+        if mark_pair_for_retraining(
+            learning_state,
+            best[0],
+            best[1],
+        ):
+            reactivated += 1
+
+    return matched, reactivated
+
+
 def run_online_training(
     args: argparse.Namespace,
     model_path: Path,
@@ -1679,7 +1763,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.6.15 Forgetting-Aware Retraining")
+    print(" LLM_GPU Chat - v1.6.16 Automatic Forgetting Recovery")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
@@ -1774,6 +1858,7 @@ def main() -> None:
     print("  /teach TEXT   save a corrected answer for the previous user turn")
     print("  /good         approve and save the previous AI answer for learning")
     print("  /train        run incremental training and reload checkpoint")
+    print("  /maintain     reactivate forgotten trusted pairs from teaching queue")
     print("  /exit         quit")
     print()
 
@@ -1906,6 +1991,25 @@ def main() -> None:
                     f"[approved learning pair saved; "
                     f"pairs={learning_log_count(learning_log)}]"
                 )
+            print()
+            continue
+
+        if command == "/maintain":
+            matched, reactivated = recover_forgotten_pairs_from_queue(
+                Path(args.teaching_queue),
+                learning_log,
+                learning_state,
+            )
+            print(
+                f"[maintenance matched={matched}, "
+                f"reactivated={reactivated}]"
+            )
+            if reactivated:
+                print("[run /train to relearn reactivated trusted pairs]")
+            elif matched:
+                print("[matched trusted pairs are already pending or current]")
+            else:
+                print("[no trusted teaching-queue match found]")
             print()
             continue
 
