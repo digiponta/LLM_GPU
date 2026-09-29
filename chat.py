@@ -1235,6 +1235,15 @@ def input_quality_check(text: str) -> tuple[bool, str]:
 
     compact = _normalize_for_similarity(q)
 
+    # Bare interrogative/function words have no subject or target concept.
+    # Do not let the language model guess a topic from prior training bias.
+    bare_interrogatives = {
+        "とは", "って", "なに", "何", "何ですか", "教えて",
+        "説明して", "について", "は", "を", "の",
+    }
+    if q.rstrip("、。！？?! ").strip() in bare_interrogatives:
+        return False, "missing query subject"
+
     # Repeated interrogative fragments such as "とはとは".
     if re.search(r"(とは){2,}|(って){2,}", q):
         return False, "malformed repeated intent"
@@ -1527,6 +1536,7 @@ def classify_resolution(
         "incoherent multi-concept input",
         "malformed short technical query",
         "empty input",
+        "missing query subject",
     )
     if any(marker in reason for marker in input_markers):
         return "INPUT_REJECT", "ask/rephrase"
@@ -1828,7 +1838,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.6.17 Validated Forgetting Recovery")
+    print(" LLM_GPU Chat - v1.6.18 Subject-Aware Input + Recovery")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
