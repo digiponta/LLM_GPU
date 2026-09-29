@@ -1,6 +1,6 @@
 # online_train.py
 #
-# LLM_GPU v1.6.0 incremental conversational learning.
+# LLM_GPU v1.6.1 manual-teaching-priority conversational learning.
 #
 # - Reads accepted/manual dialogue pairs saved by chat.py as JSONL.
 # - Replays the existing conversation corpus to reduce catastrophic forgetting.
@@ -33,29 +33,38 @@ SEED = 42
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Low-LR incremental conversational training for LLM_GPU v1.6.0."
+        description="Manual-teaching-priority conversational training for LLM_GPU v1.6.1."
     )
     p.add_argument("--chat-data", default="data/chat_history.jsonl")
     p.add_argument("--replay-data", default="data/conversation-ja.txt")
     p.add_argument("--tokenizer", default="model/tokenizer-v0.7-bpe.json")
     p.add_argument("--base-model", default="model/model-gpu-v0.8-chat-clean.pt")
-    p.add_argument("--output", default="model/model-gpu-v1.6.0-online.pt")
-    p.add_argument("--epochs", type=int, default=3)
-    p.add_argument("--learning-rate", type=float, default=1e-5)
+    p.add_argument("--output", default="model/model-gpu-v1.6.1-online.pt")
+    p.add_argument("--epochs", type=int, default=8)
+    p.add_argument("--learning-rate", type=float, default=3e-5)
     p.add_argument("--batch-size", type=int, default=8)
     p.add_argument("--validation-ratio", type=float, default=0.15)
-    p.add_argument("--patience", type=int, default=2)
+    p.add_argument("--patience", type=int, default=3)
     p.add_argument(
         "--replay-ratio",
         type=float,
         default=1.0,
-        help="Replay pairs per new chat pair. 1.0 means equal-sized replay.",
+        help="Replay pairs per new chat pair.",
+    )
+    p.add_argument("--manual-weight", type=int, default=8)
+    p.add_argument("--auto-weight", type=int, default=1)
+    p.add_argument("--replay-weight", type=int, default=2)
+    p.add_argument(
+        "--tiny-threshold",
+        type=int,
+        default=10,
+        help="Disable validation/early stopping when new chat pairs are below this count.",
     )
     return p.parse_args()
 
 
-def load_chat_jsonl(path: Path) -> List[Tuple[str, str]]:
-    pairs: List[Tuple[str, str]] = []
+def load_chat_jsonl(path: Path) -> List[Tuple[str, str, str]]:
+    pairs: List[Tuple[str, str, str]] = []
     if not path.exists():
         return pairs
     for line_no, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
@@ -67,8 +76,9 @@ def load_chat_jsonl(path: Path) -> List[Tuple[str, str]]:
             raise ValueError(f"{path}:{line_no}: invalid JSON: {e}") from e
         user = str(row.get("user", "")).strip()
         answer = str(row.get("assistant", "")).strip()
+        source = str(row.get("source", "chat-auto")).strip() or "chat-auto"
         if user and answer:
-            pairs.append((user, answer))
+            pairs.append((user, answer, source))
     return pairs
 
 
@@ -180,17 +190,31 @@ def main() -> None:
     base_path = Path(args.base_model)
     output_path = Path(args.output)
 
-    new_pairs = load_chat_jsonl(chat_path)
-    if len(new_pairs) < 2:
-        raise ValueError("At least 2 chat learning pairs are required.")
+    new_rows = load_chat_jsonl(chat_path)
+    if len(new_rows) < 1:
+        raise ValueError("At least 1 chat learning pair is required.")
+
+    manual_rows = [(u, a) for u, a, s in new_rows if s == "chat-manual"]
+    auto_rows = [(u, a) for u, a, s in new_rows if s != "chat-manual"]
+
+    weighted_new_pairs: List[Tuple[str, str]] = []
+    for pair in manual_rows:
+        weighted_new_pairs.extend([pair] * max(1, args.manual_weight))
+    for pair in auto_rows:
+        weighted_new_pairs.extend([pair] * max(1, args.auto_weight))
 
     replay = load_replay_pairs(replay_path)
     replay_count = min(
         len(replay),
-        max(0, int(round(len(new_pairs) * args.replay_ratio))),
+        max(0, int(round(len(new_rows) * args.replay_ratio))),
     )
     random.shuffle(replay)
-    pairs = list(new_pairs) + replay[:replay_count]
+    replay_pairs = replay[:replay_count]
+    weighted_replay: List[Tuple[str, str]] = []
+    for pair in replay_pairs:
+        weighted_replay.extend([pair] * max(1, args.replay_weight))
+
+    pairs = list(weighted_new_pairs) + weighted_replay
     random.shuffle(pairs)
 
     tokenizer = Tokenizer.load(str(tokenizer_path))
@@ -202,15 +226,23 @@ def main() -> None:
             f"{tokenizer.vocab_size} != {model.vocab_size}"
         )
 
-    val_count = max(1, int(round(len(pairs) * args.validation_ratio)))
-    val_count = min(val_count, len(pairs) - 1)
-    val_pairs = pairs[:val_count]
-    train_pairs = pairs[val_count:]
+    tiny_mode = len(new_rows) < args.tiny_threshold
+    if tiny_mode:
+        val_pairs: List[Tuple[str, str]] = []
+        train_pairs = pairs
+    else:
+        val_count = max(1, int(round(len(pairs) * args.validation_ratio)))
+        val_count = min(val_count, len(pairs) - 1)
+        val_pairs = pairs[:val_count]
+        train_pairs = pairs[val_count:]
 
     train_ds = ConversationDataset(train_pairs, tokenizer, model.context_length)
-    val_ds = ConversationDataset(val_pairs, tokenizer, model.context_length)
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False)
+
+    val_loader = None
+    if val_pairs:
+        val_ds = ConversationDataset(val_pairs, tokenizer, model.context_length)
+        val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False)
 
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -219,15 +251,18 @@ def main() -> None:
     )
 
     print("=" * 72)
-    print(" LLM_GPU v1.6.0 Incremental Conversation Learning")
+    print(" LLM_GPU v1.6.1 Manual Teaching Priority Learning")
     print("=" * 72)
     print("Device          :", device)
     if device.type == "cuda":
         print("GPU             :", torch.cuda.get_device_name(0))
     print("Base model      :", base_path)
     print("Base loss       :", checkpoint.get("loss"))
-    print("New chat pairs  :", len(new_pairs))
-    print("Replay pairs    :", replay_count)
+    print("New chat pairs  :", len(new_rows))
+    print("Manual pairs    :", len(manual_rows), f"(x{args.manual_weight})")
+    print("Auto pairs      :", len(auto_rows), f"(x{args.auto_weight})")
+    print("Replay pairs    :", replay_count, f"(x{args.replay_weight})")
+    print("Tiny-data mode  :", tiny_mode)
     print("Train pairs     :", len(train_pairs))
     print("Validation pairs:", len(val_pairs))
     print("Learning rate   :", args.learning_rate)
@@ -256,8 +291,22 @@ def main() -> None:
             batches += 1
 
         train_loss = total / max(1, batches)
-        val_loss = evaluate(model, val_loader, device)
         elapsed = time.perf_counter() - started
+
+        if val_loader is None:
+            print(
+                f"epoch={epoch:02d} train={train_loss:.6f} "
+                f"time={elapsed:.2f}s"
+            )
+            best_val = train_loss
+            best_epoch = epoch
+            best_state = {
+                k: v.detach().cpu().clone()
+                for k, v in model.state_dict().items()
+            }
+            continue
+
+        val_loss = evaluate(model, val_loader, device)
         print(
             f"epoch={epoch:02d} train={train_loss:.6f} "
             f"val={val_loss:.6f} ppl={math.exp(min(val_loss, 20.0)):.2f} "
@@ -294,7 +343,7 @@ def main() -> None:
     print()
     print("Training completed.")
     print("Best epoch :", best_epoch)
-    print("Best val   :", f"{best_val:.6f}")
+    print("Best metric:", f"{best_val:.6f}", "(train loss in tiny-data mode)" if tiny_mode else "(validation loss)")
     print("Saved      :", output_path)
 
 
