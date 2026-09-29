@@ -1878,7 +1878,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.6.24 Targeted Recovery Routing")
+    print(" LLM_GPU Chat - v1.6.25 Explicit Teaching")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
@@ -1971,6 +1971,7 @@ def main() -> None:
     print("  /learn off    stop capture")
     print("  /learn status show capture state and saved-pair count")
     print("  /teach TEXT   save a corrected answer for the previous user turn")
+    print("  /teachq Q => A teach an explicit question/answer pair")
     print("  /good         approve and save the previous AI answer for learning")
     print("  /train        run incremental training and reload checkpoint")
     print("  /maintain     recover the previous question from trusted teaching data")
@@ -2052,6 +2053,58 @@ def main() -> None:
                 f"[learning={'ON' if learning_enabled else 'OFF'}, "
                 f"pairs={learning_log_count(learning_log)}, "
                 f"log={learning_log}]"
+            )
+            print()
+            continue
+
+        if command.startswith("/teachq "):
+            payload = user_text[len("/teachq "):].strip()
+            if "=>" not in payload:
+                print("[usage: /teachq QUESTION => ANSWER]")
+                print()
+                continue
+
+            question, corrected = [
+                part.strip() for part in payload.split("=>", 1)
+            ]
+            if not question or not corrected:
+                print("[usage: /teachq QUESTION => ANSWER]")
+                print()
+                continue
+
+            input_ok, input_reason = input_quality_check(question)
+            if not input_ok:
+                print(f"[teaching rejected: invalid question: {input_reason}]")
+                print()
+                continue
+
+            teaching_ok, teaching_reason = validate_teaching_answer(
+                question,
+                corrected,
+            )
+            if not teaching_ok:
+                print(f"[teaching rejected: {teaching_reason}]")
+                print(f"[hint: {teaching_hint(question)}]")
+                print()
+                continue
+
+            reactivated = mark_pair_for_retraining(
+                learning_state,
+                question,
+                corrected,
+            )
+            append_learning_pair(
+                learning_log,
+                question,
+                corrected,
+                source="chat-manual",
+            )
+            if reactivated:
+                print("[previously trained pair reactivated for retraining]")
+            print(
+                f"[explicit manual learning pair saved; "
+                f"question={question}, "
+                f"pairs={learning_log_count(learning_log)}]"
             )
             print()
             continue
