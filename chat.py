@@ -3,7 +3,7 @@
 # Interactive chat interface for the current LLM_GPU conversational checkpoint.
 # Defaults to the v0.8 cleaned chat model used by the v1.4/v1.5 experiments.
 #
-# v1.5.2 additions:
+# v1.5.3 additions:
 #   - conservative chat-level Unknown rejection
 #   - multiple probe generations
 #   - token-confidence / response-agreement checks
@@ -361,6 +361,86 @@ def extract_definition_focus(text: str) -> str | None:
     return None
 
 
+def classify_intent_and_slots(question: str) -> tuple[str, list[str]]:
+    q = question.strip()
+    q_lower = q.lower()
+
+    greeting_patterns = (
+        "こんにちは", "こんばんは", "おはよう", "お疲れ", "はじめまして",
+        "やあ", "hello", "hi",
+    )
+    if any(x in q_lower for x in greeting_patterns):
+        return "greeting", []
+
+    # Comparison: "AとBの違い", "AとBを比較", "AとBの差"
+    m = re.search(
+        r"^\s*([^\s、。！？?と]{1,30})\s*と\s*([^\s、。！？?]{1,30}?)"
+        r"\s*(?:の)?(?:違い|差|比較|違う点)",
+        q,
+        flags=re.IGNORECASE,
+    )
+    if m:
+        return "comparison", [m.group(1).strip(), m.group(2).strip()]
+
+    focus = extract_definition_focus(q)
+    if focus:
+        return "definition", [focus]
+
+    return "general", []
+
+
+def greeting_consistent(answer: str) -> bool:
+    a = answer.lower()
+    greeting_terms = (
+        "こんにちは", "こんばんは", "おはよう", "お疲れ", "はじめまして",
+        "よろしく", "話しましょう", "何について", "hello", "hi",
+    )
+    return any(x in a for x in greeting_terms)
+
+
+def slot_coverage_check(
+    intent: str,
+    slots: list[str],
+    answer: str,
+) -> tuple[bool, float, str]:
+    if intent == "greeting":
+        if greeting_consistent(answer):
+            return True, 1.0, "greeting matched"
+        return False, 0.0, "greeting intent mismatch"
+
+    if not slots:
+        return True, 1.0, "no required slots"
+
+    answer_lower = answer.lower()
+    hits = [slot for slot in slots if slot.lower() in answer_lower]
+    coverage = len(hits) / len(slots)
+
+    if intent == "definition":
+        if coverage < 1.0:
+            return False, coverage, f"definition focus missing: {slots[0]}"
+        return True, coverage, "definition slot covered"
+
+    if intent == "comparison":
+        if coverage < 1.0:
+            missing = [s for s in slots if s.lower() not in answer_lower]
+            return (
+                False,
+                coverage,
+                "comparison slot missing: " + ", ".join(missing),
+            )
+
+        comparison_cues = (
+            "一方", "対して", "違", "比べ", "比較", "対照", "より",
+            "得意", "汎用", "並列", "制御",
+        )
+        if not any(cue in answer for cue in comparison_cues):
+            return False, coverage, "comparison relation missing"
+
+        return True, coverage, "comparison slots covered"
+
+    return True, coverage, "slots covered"
+
+
 def focus_consistent(question: str, answer: str) -> tuple[bool, str]:
     focus = extract_definition_focus(question)
     if not focus:
@@ -383,14 +463,29 @@ def semantic_consistency_check(
     answer: str,
     history: List[Tuple[str, str]],
     contamination_margin: float,
-) -> tuple[bool, float, float, str]:
-    ok, focus_reason = focus_consistent(current_question, answer)
-    if not ok:
-        return False, 0.0, 0.0, focus_reason
+) -> tuple[bool, float, float, str, str, list[str], float]:
+    intent, slots = classify_intent_and_slots(current_question)
+
+    slots_ok, slot_coverage, slot_reason = slot_coverage_check(
+        intent, slots, answer
+    )
+    if not slots_ok:
+        return (
+            False, 0.0, 0.0, slot_reason,
+            intent, slots, slot_coverage,
+        )
 
     qv = semantic_vector(model, tokenizer, current_question)
     av = semantic_vector(model, tokenizer, answer)
     current_sim = float(torch.dot(qv, av).item())
+
+    # Greeting turns are intentionally short and semantically broad.
+    # Slot/intent matching is more reliable than history similarity here.
+    if intent == "greeting":
+        return (
+            True, current_sim, -1.0, slot_reason,
+            intent, slots, slot_coverage,
+        )
 
     previous_sims: List[float] = []
     for old_user, _ in history[-3:]:
@@ -405,9 +500,20 @@ def semantic_consistency_check(
             current_sim,
             previous_best,
             "history contamination",
+            intent,
+            slots,
+            slot_coverage,
         )
 
-    return True, current_sim, previous_best, focus_reason
+    return (
+        True,
+        current_sim,
+        previous_best,
+        slot_reason,
+        intent,
+        slots,
+        slot_coverage,
+    )
 
 
 def evaluate_unknown_gate(
@@ -455,7 +561,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.5.2 QA Semantic Consistency Gate")
+    print(" LLM_GPU Chat - v1.5.3 Multi-Focus / Intent-Aware Gate")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
@@ -608,6 +714,11 @@ def main() -> None:
         confidence = primary.mean_confidence
         agreement = 1.0
         reason = "rejection disabled"
+        qa_similarity = 0.0
+        previous_similarity = -1.0
+        intent = "general"
+        slots: list[str] = []
+        slot_coverage = 1.0
 
         if args.unknown_rejection:
             accepted, confidence, agreement, reason = evaluate_unknown_gate(
@@ -616,12 +727,17 @@ def main() -> None:
                 min_agreement=args.min_agreement,
             )
 
-        if accepted and args.semantic_consistency:
+        if args.semantic_consistency:
+            # Intent/slot analysis is useful even when the generation gate
+            # already rejected the response, so always compute metadata.
             (
                 semantic_ok,
                 qa_similarity,
                 previous_similarity,
                 semantic_reason,
+                intent,
+                slots,
+                slot_coverage,
             ) = semantic_consistency_check(
                 model=model,
                 tokenizer=tokenizer,
@@ -630,10 +746,10 @@ def main() -> None:
                 history=history,
                 contamination_margin=args.history_contamination_margin,
             )
-            if not semantic_ok:
+            if accepted and not semantic_ok:
                 accepted = False
                 reason = semantic_reason
-            elif semantic_reason != "no explicit focus":
+            elif accepted:
                 reason = semantic_reason
 
         reply = primary.text if accepted else UNKNOWN_REPLY
@@ -654,7 +770,11 @@ def main() -> None:
             status = "KNOWN" if accepted else "UNKNOWN"
             semantic_part = ""
             if args.semantic_consistency:
+                slot_text = "|".join(slots) if slots else "-"
                 semantic_part = (
+                    f", intent={intent}"
+                    f", slots={slot_text}"
+                    f", slot_cov={slot_coverage:.2f}"
                     f", qa_sim={qa_similarity:.3f}"
                     f", prev_sim={previous_similarity:.3f}"
                 )
