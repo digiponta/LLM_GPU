@@ -3,7 +3,7 @@
 # Interactive chat interface for the current LLM_GPU conversational checkpoint.
 # Defaults to the v0.8 cleaned chat model used by the v1.4/v1.5 experiments.
 #
-# v1.5.3 additions:
+# v1.5.4 additions:
 #   - conservative chat-level Unknown rejection
 #   - multiple probe generations
 #   - token-confidence / response-agreement checks
@@ -127,22 +127,82 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _slot_overlap(a: list[str], b: list[str]) -> bool:
+    aa = {x.lower() for x in a}
+    bb = {x.lower() for x in b}
+    return bool(aa & bb)
+
+
+def select_relevant_history(
+    history: List[Tuple[str, str]],
+    user_text: str,
+    history_turns: int,
+) -> List[Tuple[str, str]]:
+    if history_turns <= 0 or not history:
+        return []
+
+    current_intent, current_slots = classify_intent_and_slots(user_text)
+    selected: List[Tuple[str, str]] = []
+
+    for old_user, old_ai in reversed(history):
+        old_intent, old_slots = classify_intent_and_slots(old_user)
+
+        relevant = False
+
+        if current_intent == "greeting":
+            relevant = old_intent == "greeting"
+
+        elif current_intent == "definition":
+            # Keep only definition/comparison turns that mention the same focus.
+            relevant = (
+                old_intent in ("definition", "comparison")
+                and _slot_overlap(current_slots, old_slots)
+            )
+
+        elif current_intent == "comparison":
+            # Keep turns that mention either comparison target.
+            relevant = (
+                old_intent in ("definition", "comparison")
+                and _slot_overlap(current_slots, old_slots)
+            )
+
+        else:
+            # General questions are safest with no inherited context unless
+            # there is a directly related slot-bearing turn.
+            relevant = (
+                bool(current_slots)
+                and _slot_overlap(current_slots, old_slots)
+            )
+
+        if relevant:
+            selected.append((old_user, old_ai))
+            if len(selected) >= history_turns:
+                break
+
+    selected.reverse()
+    return selected
+
+
 def build_prompt(
     history: List[Tuple[str, str]],
     user_text: str,
     history_turns: int,
-) -> str:
+) -> tuple[str, List[Tuple[str, str]]]:
     chunks: List[str] = []
+    selected = select_relevant_history(
+        history=history,
+        user_text=user_text,
+        history_turns=history_turns,
+    )
 
-    if history_turns > 0:
-        for old_user, old_ai in history[-history_turns:]:
-            chunks.append(
-                f"{USER_PREFIX}{old_user}\n"
-                f"{AI_PREFIX}{old_ai}\n"
-            )
+    for old_user, old_ai in selected:
+        chunks.append(
+            f"{USER_PREFIX}{old_user}\n"
+            f"{AI_PREFIX}{old_ai}\n"
+        )
 
     chunks.append(f"{USER_PREFIX}{user_text}\n{AI_PREFIX}")
-    return "".join(chunks)
+    return "".join(chunks), selected
 
 
 def _clean_reply(reply: str) -> str:
@@ -561,7 +621,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.5.3 Multi-Focus / Intent-Aware Gate")
+    print(" LLM_GPU Chat - v1.5.4 Intent-Scoped History / Clean Context")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
@@ -669,7 +729,7 @@ def main() -> None:
             )
             continue
 
-        prompt = build_prompt(
+        prompt, selected_history = build_prompt(
             history=history,
             user_text=user_text,
             history_turns=args.history_turns,
@@ -783,6 +843,7 @@ def main() -> None:
                 f"confidence={confidence:.3f}, "
                 f"agreement={agreement:.3f}"
                 f"{semantic_part}, "
+                f"context_turns={len(selected_history)}, "
                 f"reason={reason}]"
             )
 
@@ -793,9 +854,11 @@ def main() -> None:
         )
         print()
 
-        # Do not contaminate subsequent context with a rejected hallucination.
-        # Record only the conservative fallback response.
-        history.append((user_text, reply))
+        # v1.5.4 clean-history policy:
+        # only accepted KNOWN turns may enter future generation context.
+        # UNKNOWN/rejected turns are intentionally discarded.
+        if accepted:
+            history.append((user_text, reply))
 
 
 if __name__ == "__main__":
