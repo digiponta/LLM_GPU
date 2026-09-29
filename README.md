@@ -1,62 +1,294 @@
 # LLM_GPU
 
-CUDA/PyTorch GPU version of the homemade LLM project.
+A homemade Japanese Transformer language-model project implemented in Python /
+PyTorch and accelerated with CUDA.
 
-This repository is based on the architecture and end-to-end flow proven in
-`digiponta/LLM` branch `v0.3`. The original educational virtual-GPU runtime
-and hand-written backward propagation are replaced by real PyTorch tensors,
-CUDA kernels, and PyTorch autograd.
+The project began as a minimal educational LLM and has evolved through tokenizer,
+model-scale, conversational-learning, semantic-gating, and online-learning
+experiments. The current stable experimental baseline is **v1.6.26**.
 
-## Architecture
+## Current Stable Baseline: v1.6.26
+
+### Current model
 
 ```text
-Japanese corpus
-    |
-character tokenizer
-    |
-Embedding
-    |
-Transformer blocks
-    |-- LayerNorm
-    |-- single-head causal Self-Attention
-    |-- residual connection
-    |-- LayerNorm
-    |-- FFN (Linear -> GELU -> Linear)
-    |-- residual connection
-    |
-final LayerNorm
-    |
-lm_head
-    |
-Cross Entropy
-    |
-PyTorch autograd
-    |
-AdamW
-    |
-CUDA GPU
+Tokenizer       : byte-level BPE
+Vocabulary size : 8,000
+Parameters      : 8,960,000
+Context length  : 512 tokens
+d_model         : 256
+Transformer     : 6 layers
+Attention heads : 8
+GPU             : tested on NVIDIA GeForce RTX 3070 Ti
+Online model    : model/model-gpu-v1.6.2-online.pt
+Tokenizer file  : model/tokenizer-v0.7-bpe.json
+Concept calib   : model/concept-calibration-v1512.pt
 ```
 
-## Files
+The current v1.6.x work is no longer only a text-generation experiment. It
+also investigates whether a small self-made LLM can support controlled
+conversation learning while rejecting low-quality, unknown, or semantically
+inconsistent answers.
+
+### Current chat pipeline
 
 ```text
-tokenizer.py          character tokenizer compatible with the original project
-dataset.py            next-token dataset / uniform sampled windows
-model.py              CUDA-capable Transformer language model
-train.py              GPU training loop with progress and ETA
-train_corpus.py       corpus pretraining entry point
-train_conversation.py v0.5 conversational fine-tuning from the v0.4 checkpoint
-chat.py               multi-turn conversational interface
-evaluate_chat.py      deterministic conversational regression evaluation
-infer.py              interactive raw GPU inference
-check_gpu.py          CUDA/PyTorch diagnostic
-prepare_wikipedia.py  Wikipedia dump -> plain text helper
-requirements.txt      Python dependencies
+User input
+   |
+   v
+Input Quality Check
+   |
+   +-- malformed / subjectless ----------------> INPUT_REJECT
+   |
+   v
+LLM generation
+   |
+   +-- multiple generation probes
+   +-- token confidence
+   +-- top-2 margin
+   +-- lexical agreement
+   +-- semantic probe agreement
+   +-- intent / slot analysis
+   +-- question-answer semantic consistency
+   +-- concept calibration
+   |
+   v
+Semantic Gate
+   |
+   +-- ACCEPT
+   +-- LEARNING_GAP
+   +-- UNKNOWN_KNOWLEDGE
+   +-- GATE_REVIEW
+   +-- INPUT_REJECT
+```
+
+Only accepted turns can enter normal conversational history. Rejected responses
+are not silently treated as valid knowledge.
+
+## v1.6 Learning and Recovery
+
+The conversational learning loop uses explicit trusted examples rather than
+blind self-training.
+
+```text
+ACCEPT
+  -> normal response
+
+LEARNING_GAP
+  |
+  +-- trusted teacher exists
+  |      -> /maintain
+  |      -> reactivate trusted pair
+  |      -> /train
+  |
+  +-- no trusted teacher
+         -> NEEDS_TEACHING
+         -> /teach or /teachq
+         -> /train
+
+UNKNOWN_KNOWLEDGE
+  -> knowledge queue
+
+GATE_REVIEW
+  -> gate-review queue
+
+INPUT_REJECT
+  -> ask/rephrase
+```
+
+### Learning data
+
+Trusted conversational examples are stored in:
+
+```text
+data/chat_history.jsonl
+```
+
+Persistent deduplication state is stored in:
+
+```text
+data/chat_learning_state.json
+```
+
+Routing queues:
+
+```text
+data/teaching_queue.jsonl
+data/knowledge_queue.jsonl
+data/gate_review_queue.jsonl
+```
+
+Legacy automatic chat captures are ignored by the trainer. Trusted sources are
+manual teaching, approved answers, and validated recovery examples.
+
+### Incremental trainer
+
+`online_train.py` performs assistant-answer-only incremental SFT.
+
+Current behavior includes:
+
+- SHA-256 pair fingerprints for deduplication;
+- only new or explicitly reactivated trusted pairs are trained;
+- weak replay of prior trusted examples;
+- replay from the conversational corpus;
+- stronger weighting for recovery examples;
+- recovery-only stabilization at a lower learning rate;
+- persistent tracking of consumed trusted examples.
+
+Typical training weights:
+
+```text
+manual teaching     : x4
+approved answer     : x4
+recovery example    : x8
+prior trusted replay: x1
+corpus replay       : x1
+```
+
+For tiny updates, the trainer uses the training loss to select the best epoch
+instead of creating an unstable validation split from only a few examples.
+
+## Chat Commands
+
+Start the current model with:
+
+```powershell
+python chat.py
+```
+
+Commands:
+
+```text
+/reset
+    clear conversation history
+
+/info
+    show model/checkpoint information
+
+/learn on
+/learn off
+/learn status
+    control accepted-turn capture
+
+/teach TEXT
+    teach a corrected answer for the immediately preceding user question
+
+/teachq QUESTION => ANSWER
+    teach an explicit question/answer pair; does not depend on conversation state
+
+/good
+    approve the previous accepted AI answer as trusted learning data
+
+/maintain
+    recover the immediately preceding question from trusted teaching data
+
+/maintain all
+    inspect/recover all pending teaching candidates
+
+/train
+    run incremental training and reload the resulting checkpoint
+
+/exit
+    quit
+```
+
+Example explicit teaching:
+
+```text
+/teachq LLMとは => LLMは大量のテキストから学習し、言語を扱う大規模言語モデルです。
+/train
+LLMとは
+```
+
+A successful result is expected to reach:
+
+```text
+gate=KNOWN
+resolution=ACCEPT
+```
+
+## Forgetting-Aware Recovery
+
+v1.6.15-v1.6.25 introduced a recovery mechanism for knowledge that had been
+trained previously but was no longer produced reliably after later incremental
+updates.
+
+Important safeguards include:
+
+1. A previously trained pair can be explicitly reactivated.
+2. Recovery candidates must pass the current teaching validator.
+3. Definition recovery preserves the exact target concept.
+   `AIとは` cannot repair `LLMとは` merely because both strings end in
+   `とは`.
+4. If no valid trusted teacher exists, recovery returns
+   `NEEDS_TEACHING` instead of inventing a teacher.
+5. `/maintain` is targeted to the previous question; `/maintain all` is
+   explicit.
+6. Rejected candidates can be displayed diagnostically so generation failures
+   and gate failures can be distinguished.
+
+## v1.6.26 Regression Baseline
+
+The current integration test is:
+
+```powershell
+python run_chat_learning_regression_v1626.py
+```
+
+Latest verified result:
+
+```text
+Passed : 24/24
+Failed : 0/24
+Result : PASS
+```
+
+The 24 tests cover:
+
+- subjectless and malformed input rejection;
+- known-definition input acceptance;
+- intent and semantic-slot extraction;
+- informative versus echo-only teaching;
+- wrong-concept teaching rejection;
+- five-way resolution routing;
+- exact-concept recovery;
+- prevention of AI-to-LLM cross-concept recovery;
+- safe behavior when no trusted teacher exists.
+
+The regression suite uses temporary files for recovery tests and does not
+modify the real learning log, learning state, or routing queues.
+
+## Current Key Files
+
+```text
+model.py
+    Transformer language model
+
+tokenizer_bpe.py
+    byte-level BPE tokenizer
+
+chat.py
+    v1.6.26 interactive chat, semantic gate, teaching and recovery routing
+
+online_train.py
+    forgetting-aware incremental conversational trainer
+
+run_chat_learning_regression_v1626.py
+    v1.6.26 integration/regression suite
+
+evaluate_chat.py
+    conversational evaluation
+
+infer.py
+    raw interactive inference
+
+check_gpu.py
+    CUDA/PyTorch diagnostic
 ```
 
 ## Installation
 
-Install a CUDA-enabled PyTorch build suitable for the NVIDIA driver on the PC,
+Install a CUDA-enabled PyTorch build appropriate for the local NVIDIA driver,
 then install the project requirements.
 
 ```powershell
@@ -64,90 +296,68 @@ python -m pip install -r requirements.txt
 python check_gpu.py
 ```
 
-A successful setup reports:
+A successful CUDA check should report:
 
 ```text
 CUDA available : True
 Device         : cuda
 GPU            : NVIDIA ...
-VRAM           : ... GiB
 ```
 
-## Training data
-
-By default the trainer looks for:
-
-```text
-data/general-ja.txt
-data/data-nagato.txt
-```
-
-For convenience, if those files do not exist in this repository, it also
-looks for the existing original-project files:
-
-```text
-../LLM/data/general-ja.txt
-../LLM/data/data-nagato.txt
-```
-
-## Train
+## Recommended v1.6.26 Workflow
 
 ```powershell
-python train_corpus.py
+python run_chat_learning_regression_v1626.py
+python chat.py
 ```
 
-Default v0.4 long GPU run:
+When a known concept is forgotten:
 
 ```text
-context length : 64
-d_model        : 64
-layers         : 2
-FFN dimension  : 256
-attention heads: 1
-batch size     : 64
-samples        : 120,000,000
-epochs         : 3
-learning rate  : 5e-4
+ask the question
+/maintain
+/train
+ask the question again
 ```
 
-This sample count is estimated from the measured v0.3 benchmark on an
-RTX 3070 Ti: 20,000 samples x 3 epochs took about 6 seconds. Linear scaling
-gives approximately 120,000,000 samples x 3 epochs for a ten-hour run.
-
-Actual runtime will vary with GPU clocks, thermals, system load, and I/O.
-v0.4 computes sample positions on demand instead of allocating a huge Python
-list, and DataLoader shuffling is disabled because the dataset itself uses a
-deterministic pseudo-random corpus traversal.
-
-Checkpoint:
+When no trusted teacher exists:
 
 ```text
-model/model-gpu-v0.4.pt
+/teachq QUESTION => CORRECT_ANSWER
+/train
+ask the question again
 ```
 
-## Inference
+## Experimental Status
 
-```powershell
-python infer.py
-```
+v1.6.26 is an **experimental stable baseline**, not a claim of production-grade
+general-purpose intelligence.
 
-Generation uses temperature, top-k sampling, repetition penalty, and a bounded
-context window.
-
-## Relationship to the original v0.3
-
-The original repository verified the complete path:
+The main result of the v1.6 series is that this small homemade model now has a
+controlled loop for:
 
 ```text
-corpus -> tokenizer -> model forward -> loss -> backward
-       -> optimizer -> checkpoint -> reload -> inference
+generation
+-> semantic validation
+-> rejection/routing
+-> explicit teaching
+-> incremental training
+-> forgetting recovery
+-> regression verification
 ```
 
-LLM_GPU preserves that path while moving tensor computation and gradient
-calculation to a physical CUDA GPU.
-
+This baseline is intended to make subsequent experiments reproducible without
+losing the behavior established during the v1.6 development cycle.
 
 ---
+
+# Historical Experiments
+
+The sections below preserve the earlier LLM_GPU development history. Some
+architecture sizes, checkpoint names, and commands are historical and should
+not be interpreted as the current v1.6.26 defaults.
+
+
 
 ## Note: Practical Training Data Scale for LLM_GPU
 
