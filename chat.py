@@ -870,13 +870,63 @@ def greeting_consistent(answer: str) -> bool:
 
 
 
+def _normalize_definition_surface(text: str) -> str:
+    norm = _normalize_for_similarity(text)
+    # Strip sentence-final punctuation and light copula/polite endings so that
+    # "人工知能", "人工知能です", and "人工知能です。" are treated alike.
+    norm = re.sub(r"[。．.!！?？、,]+$", "", norm)
+    for ending in ("です", "だ", "である", "です。", "だ。", "である。"):
+        e = _normalize_for_similarity(ending)
+        if norm.endswith(e):
+            norm = norm[:-len(e)]
+            break
+    return norm
+
+
 def definition_is_echo_only(slot: str, answer: str) -> bool:
-    answer_norm = _normalize_for_similarity(answer)
+    answer_norm = _normalize_definition_surface(answer)
     aliases = {
-        _normalize_for_similarity(alias)
+        _normalize_definition_surface(alias)
         for alias in slot_aliases(slot)
     }
     return answer_norm in aliases
+
+
+def definition_is_uninformative(slot: str, answer: str) -> bool:
+    if definition_is_echo_only(slot, answer):
+        return True
+
+    a = _normalize_for_similarity(answer)
+    # Reject vacuous templates that mention the focus but provide no category,
+    # function, property, relation, or differentiating content.
+    vacuous_patterns = (
+        "同じ種類のもの",
+        "同じもの",
+        "ものです",
+        "ものだ",
+        "ものです。",
+        "ものだ。",
+        "一種です",
+        "一種だ",
+        "何かです",
+        "何かだ",
+    )
+    if any(_normalize_for_similarity(p) in a for p in vacuous_patterns):
+        # "Xは言語モデルです" should pass because it supplies a concrete category.
+        informative_terms = (
+            "モデル", "装置", "技術", "方式", "手法", "プロセッサ",
+            "処理装置", "ソフトウェア", "ハードウェア", "システム",
+            "人工知能", "言語モデル", "大規模言語モデル",
+        )
+        if not any(_normalize_for_similarity(t) in a for t in informative_terms):
+            return True
+
+    # Require at least some content beyond the focus/alias and light particles.
+    stripped = a
+    for alias in sorted(slot_aliases(slot), key=len, reverse=True):
+        stripped = stripped.replace(_normalize_for_similarity(alias), "")
+    stripped = re.sub(r"(とは|は|って|を|が|に|で|の|です|だ|である|。|、|,|\.)", "", stripped)
+    return len(stripped) < 2
 
 
 def slot_coverage_check(
@@ -901,6 +951,8 @@ def slot_coverage_check(
 
         if definition_is_echo_only(slots[0], answer):
             return False, coverage, "definition answer is only an echo"
+        if definition_is_uninformative(slots[0], answer):
+            return False, coverage, "definition answer is uninformative"
 
         return True, coverage, "definition slot covered"
 
@@ -975,20 +1027,27 @@ def semantic_consistency_check(
 
     # v1.6.4 hard constraint: a definition that is only the focus term or
     # one of its aliases is incomplete. Do not let concept fallback override it.
-    if (
-        intent == "definition"
-        and slots
-        and definition_is_echo_only(slots[0], answer)
-    ):
-        return (
-            False,
-            current_sim,
-            0.0,
-            "definition answer is only an echo",
-            intent,
-            slots,
-            slot_coverage,
-        )
+    if intent == "definition" and slots:
+        if definition_is_echo_only(slots[0], answer):
+            return (
+                False,
+                current_sim,
+                0.0,
+                "definition answer is only an echo",
+                intent,
+                slots,
+                slot_coverage,
+            )
+        if definition_is_uninformative(slots[0], answer):
+            return (
+                False,
+                current_sim,
+                0.0,
+                "definition answer is uninformative",
+                intent,
+                slots,
+                slot_coverage,
+            )
 
     if not slots_ok and intent in ("definition", "comparison") and slots:
         covered = 0
@@ -1146,7 +1205,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.6.4 Definition Completeness + Context-Safe Gate")
+    print(" LLM_GPU Chat - v1.6.5 Definition Informativeness + Context-Safe Gate")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
