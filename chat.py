@@ -1878,7 +1878,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.6.25 Explicit Teaching")
+    print(" LLM_GPU Chat - v1.6.26 Regression Baseline")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
