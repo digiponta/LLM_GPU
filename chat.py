@@ -3,7 +3,7 @@
 # Interactive chat interface for the current LLM_GPU conversational checkpoint.
 # Defaults to the v0.8 cleaned chat model used by the v1.4/v1.5 experiments.
 #
-# v1.5.1 additions:
+# v1.5.2 additions:
 #   - conservative chat-level Unknown rejection
 #   - multiple probe generations
 #   - token-confidence / response-agreement checks
@@ -301,6 +301,100 @@ def malformed_or_unstable(text: str) -> bool:
     return False
 
 
+@torch.no_grad()
+def semantic_vector(
+    model: LanguageModel,
+    tokenizer: Tokenizer,
+    text: str,
+    block_index: int = 4,
+) -> torch.Tensor:
+    """Mean pooled hidden representation at block5 (index 4)."""
+    ids = tokenizer.encode(text, add_bos=True)
+    if not ids:
+        return torch.zeros(model.d_model, device=next(model.parameters()).device)
+
+    ids = ids[-model.context_length:]
+    device = next(model.parameters()).device
+    x_ids = torch.tensor([ids], dtype=torch.long, device=device)
+
+    x = model.embedding(x_ids)
+    if model.position_embedding is not None:
+        positions = torch.arange(x_ids.shape[1], device=device)
+        x = x + model.position_embedding(positions).unsqueeze(0)
+
+    last = min(block_index, len(model.blocks)-1)
+    for i in range(last + 1):
+        x = model.blocks[i](x)
+
+    # Exclude BOS when possible.
+    token_states = x[0, 1:, :] if x.shape[1] > 1 else x[0]
+    v = token_states.mean(dim=0)
+    return F.normalize(v, dim=0)
+
+
+def extract_definition_focus(text: str) -> str | None:
+    """Extract focus from short Japanese definition prompts such as 'GPUとは'."""
+    compact = text.strip()
+    patterns = [
+        r"^\s*([A-Za-z0-9_+.#\-]{2,20})\s*(?:とは|って|とは何|って何)",
+        r"^\s*([^\s、。！？?]{1,20})\s*(?:とは|って)\s*[？?]?$",
+    ]
+    for p in patterns:
+        m = re.search(p, compact, flags=re.IGNORECASE)
+        if m:
+            return m.group(1).strip()
+    return None
+
+
+def focus_consistent(question: str, answer: str) -> tuple[bool, str]:
+    focus = extract_definition_focus(question)
+    if not focus:
+        return True, "no explicit focus"
+
+    if focus.lower() in answer.lower():
+        return True, "focus preserved"
+
+    # Strong mismatch for acronym/technical-term definition questions.
+    if re.fullmatch(r"[A-Za-z0-9_+.#\-]{2,20}", focus):
+        return False, f"definition focus missing: {focus}"
+
+    return True, "focus not mandatory"
+
+
+def semantic_consistency_check(
+    model: LanguageModel,
+    tokenizer: Tokenizer,
+    current_question: str,
+    answer: str,
+    history: List[Tuple[str, str]],
+    contamination_margin: float,
+) -> tuple[bool, float, float, str]:
+    ok, focus_reason = focus_consistent(current_question, answer)
+    if not ok:
+        return False, 0.0, 0.0, focus_reason
+
+    qv = semantic_vector(model, tokenizer, current_question)
+    av = semantic_vector(model, tokenizer, answer)
+    current_sim = float(torch.dot(qv, av).item())
+
+    previous_sims: List[float] = []
+    for old_user, _ in history[-3:]:
+        pv = semantic_vector(model, tokenizer, old_user)
+        previous_sims.append(float(torch.dot(pv, av).item()))
+
+    previous_best = max(previous_sims) if previous_sims else -1.0
+
+    if previous_sims and previous_best > current_sim + contamination_margin:
+        return (
+            False,
+            current_sim,
+            previous_best,
+            "history contamination",
+        )
+
+    return True, current_sim, previous_best, focus_reason
+
+
 def evaluate_unknown_gate(
     results: List[GenerationResult],
     min_confidence: float,
@@ -346,7 +440,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.5.1 + Unknown Rejection")
+    print(" LLM_GPU Chat - v1.5.2 QA Semantic Consistency Gate")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
@@ -507,6 +601,26 @@ def main() -> None:
                 min_agreement=args.min_agreement,
             )
 
+        if accepted and args.semantic_consistency:
+            (
+                semantic_ok,
+                qa_similarity,
+                previous_similarity,
+                semantic_reason,
+            ) = semantic_consistency_check(
+                model=model,
+                tokenizer=tokenizer,
+                current_question=user_text,
+                answer=primary.text,
+                history=history,
+                contamination_margin=args.history_contamination_margin,
+            )
+            if not semantic_ok:
+                accepted = False
+                reason = semantic_reason
+            elif semantic_reason != "no explicit focus":
+                reason = semantic_reason
+
         reply = primary.text if accepted else UNKNOWN_REPLY
         new_tokens = sum(r.token_count for r in results)
 
@@ -523,10 +637,17 @@ def main() -> None:
 
         if args.show_risk and args.unknown_rejection:
             status = "KNOWN" if accepted else "UNKNOWN"
+            semantic_part = ""
+            if args.semantic_consistency:
+                semantic_part = (
+                    f", qa_sim={qa_similarity:.3f}"
+                    f", prev_sim={previous_similarity:.3f}"
+                )
             print(
                 f"[gate={status}, "
                 f"confidence={confidence:.3f}, "
-                f"agreement={agreement:.3f}, "
+                f"agreement={agreement:.3f}"
+                f"{semantic_part}, "
                 f"reason={reason}]"
             )
 
