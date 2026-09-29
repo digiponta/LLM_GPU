@@ -3,7 +3,7 @@
 # Interactive chat interface for the current LLM_GPU conversational checkpoint.
 # Defaults to the v0.8 cleaned chat model used by the v1.4/v1.5 experiments.
 #
-# v1.5.7 additions:
+# v1.5.8 additions:
 #   - conservative chat-level Unknown rejection
 #   - multiple probe generations
 #   - token-confidence / response-agreement checks
@@ -587,18 +587,30 @@ def semantic_consistency_check(
             intent, slots, 0.0,
         )
 
+    # Compute semantic similarity before lexical slot rejection so that
+    # canonical concepts can use a conservative semantic fallback.
+    qv = semantic_vector(model, tokenizer, current_question)
+    av = semantic_vector(model, tokenizer, answer)
+    current_sim = float(torch.dot(qv, av).item())
+
     slots_ok, slot_coverage, slot_reason = slot_coverage_check(
         intent, slots, answer
     )
     if not slots_ok:
-        return (
-            False, 0.0, 0.0, slot_reason,
-            intent, slots, slot_coverage,
+        canonical_definition = (
+            intent == "definition"
+            and len(slots) == 1
+            and _clean_slot(slots[0]).upper() in KNOWN_ENTITY_TOKENS
         )
-
-    qv = semantic_vector(model, tokenizer, current_question)
-    av = semantic_vector(model, tokenizer, answer)
-    current_sim = float(torch.dot(qv, av).item())
+        if canonical_definition and current_sim >= 0.86:
+            slots_ok = True
+            slot_coverage = 1.0
+            slot_reason = "definition semantic fallback"
+        else:
+            return (
+                False, current_sim, 0.0, slot_reason,
+                intent, slots, slot_coverage,
+            )
 
     # Greeting turns are intentionally short and semantically broad.
     # Slot/intent matching is more reliable than history similarity here.
@@ -635,6 +647,22 @@ def semantic_consistency_check(
         slots,
         slot_coverage,
     )
+
+
+def calibrated_agreement_threshold(
+    intent: str,
+    semantic_ok: bool,
+    slot_coverage: float,
+    base_threshold: float,
+) -> float:
+    """Relax agreement only when semantic structure is already verified."""
+    if (
+        semantic_ok
+        and slot_coverage >= 1.0
+        and intent in ("definition", "comparison")
+    ):
+        return min(base_threshold, 0.30)
+    return base_threshold
 
 
 def evaluate_unknown_gate(
@@ -682,7 +710,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.5.7 Robust Slot Parsing / Unknown Entity Gate")
+    print(" LLM_GPU Chat - v1.5.8 Intent-Calibrated Acceptance")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
@@ -842,16 +870,12 @@ def main() -> None:
         slots: list[str] = []
         slot_coverage = 1.0
 
-        if args.unknown_rejection:
-            accepted, confidence, agreement, reason = evaluate_unknown_gate(
-                results,
-                min_confidence=args.min_confidence,
-                min_agreement=args.min_agreement,
-            )
+        semantic_ok = True
+        semantic_reason = "semantic check disabled"
 
         if args.semantic_consistency:
-            # Intent/slot analysis is useful even when the generation gate
-            # already rejected the response, so always compute metadata.
+            # Run semantic verification first. v1.5.8 may relax agreement
+            # only after slots/entities/intent are semantically validated.
             (
                 semantic_ok,
                 qa_similarity,
@@ -868,10 +892,27 @@ def main() -> None:
                 history=history,
                 contamination_margin=args.history_contamination_margin,
             )
-            if accepted and not semantic_ok:
+
+        if args.unknown_rejection:
+            effective_agreement = calibrated_agreement_threshold(
+                intent=intent,
+                semantic_ok=semantic_ok,
+                slot_coverage=slot_coverage,
+                base_threshold=args.min_agreement,
+            )
+            accepted, confidence, agreement, reason = evaluate_unknown_gate(
+                results,
+                min_confidence=args.min_confidence,
+                min_agreement=effective_agreement,
+            )
+        else:
+            effective_agreement = args.min_agreement
+
+        if accepted and args.semantic_consistency:
+            if not semantic_ok:
                 accepted = False
                 reason = semantic_reason
-            elif accepted:
+            else:
                 reason = semantic_reason
 
         reply = primary.text if accepted else UNKNOWN_REPLY
@@ -899,6 +940,7 @@ def main() -> None:
                     f", slot_cov={slot_coverage:.2f}"
                     f", qa_sim={qa_similarity:.3f}"
                     f", prev_sim={previous_similarity:.3f}"
+                    f", agr_th={effective_agreement:.2f}"
                 )
             print(
                 f"[gate={status}, "
