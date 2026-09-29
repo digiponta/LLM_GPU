@@ -1132,6 +1132,81 @@ def focus_consistent(question: str, answer: str) -> tuple[bool, str]:
     return True, "focus not mandatory"
 
 
+
+ANSWER_CONCEPT_RULES = {
+    "ai": {
+        "required_any": ("人工知能", "知的", "技術", "システム", "llm"),
+        "forbidden": (),
+    },
+    "人工知能": {
+        "required_any": ("人工知能", "知的", "技術", "システム", "ai"),
+        "forbidden": (),
+    },
+    "cpu": {
+        "required_any": ("中央処理装置", "プロセッサ", "命令", "制御", "演算"),
+        "forbidden": ("人工知能", "llm", "言語モデル"),
+    },
+    "gpu": {
+        "required_any": ("gpu", "並列", "演算", "プロセッサ", "画像処理装置"),
+        "forbidden": ("人工知能", "llm", "言語モデル"),
+    },
+    "llm": {
+        "required_any": ("llm", "言語モデル", "大規模言語モデル", "言語"),
+        "forbidden": ("画像処理装置", "中央処理装置"),
+    },
+}
+
+
+def answer_concept_consistency(
+    question: str,
+    answer: str,
+) -> tuple[bool, str]:
+    q = question.lower()
+    matched_key = None
+    for key in ("gpu", "cpu", "llm", "人工知能", "ai"):
+        if key in q:
+            matched_key = key
+            break
+
+    if matched_key is None:
+        return True, "no answer concept rule"
+
+    rule = ANSWER_CONCEPT_RULES[matched_key]
+    a = answer.lower()
+
+    required = rule["required_any"]
+    if required and not any(term.lower() in a for term in required):
+        return False, f"answer concept missing for {matched_key.upper()}"
+
+    bad = [term for term in rule["forbidden"] if term.lower() in a]
+    if bad:
+        return False, (
+            f"answer concept conflict for {matched_key.upper()}: "
+            + ", ".join(bad)
+        )
+
+    return True, "answer concept consistent"
+
+
+def classify_resolution(
+    accepted: bool,
+    reason: str,
+) -> tuple[str, str]:
+    if accepted:
+        return "ACCEPT", "none"
+
+    learning_markers = (
+        "definition answer is only an echo",
+        "definition answer is uninformative",
+        "concept slot missing",
+        "unknown entity missing",
+    )
+    if any(marker in reason for marker in learning_markers):
+        return "LEARNING_GAP", "teach/train"
+
+    return "GATE_ERROR", "gate/rejection"
+
+
 def semantic_consistency_check(
     model: LanguageModel,
     tokenizer: Tokenizer,
@@ -1401,7 +1476,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.6.10 Input Quality + Answer-Aware Gate")
+    print(" LLM_GPU Chat - v1.6.11 Gate-vs-Learning Separation")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
@@ -1641,7 +1716,8 @@ def main() -> None:
                     f"intent=input_quality, slots=-, slot_cov=0.00, "
                     f"qa_sim=0.000, prev_sim=-1.000, "
                     f"agr_th={args.min_agreement:.2f}, "
-                    f"context_turns=0, reason={input_reason}]"
+                    f"context_turns=0, resolution=GATE_ERROR, "
+                    f"action=gate/rejection, reason={input_reason}]"
                 )
             print("[0 generated probe tokens, 0.00s, 0.0 tok/s]")
             print()
@@ -1723,6 +1799,14 @@ def main() -> None:
                 contamination_margin=args.history_contamination_margin,
             )
 
+        answer_concept_ok, answer_concept_reason = answer_concept_consistency(
+            user_text,
+            primary.text,
+        )
+        if semantic_ok and not answer_concept_ok:
+            semantic_ok = False
+            semantic_reason = answer_concept_reason
+
         if args.unknown_rejection:
             effective_agreement = calibrated_agreement_threshold(
                 intent=intent,
@@ -1761,6 +1845,8 @@ def main() -> None:
                 reason = semantic_reason
             # Preserve diagnostic reasons such as "semantic probe agreement".
 
+        resolution, action = classify_resolution(accepted, reason)
+
         reply = primary.text if accepted else UNKNOWN_REPLY
         new_tokens = sum(r.token_count for r in results)
 
@@ -1797,6 +1883,7 @@ def main() -> None:
                 f"sem_agreement={semantic_agreement:.3f}"
                 f"{semantic_part}, "
                 f"context_turns={len(selected_history)}, "
+                f"resolution={resolution}, action={action}, "
                 f"reason={reason}]"
             )
 
