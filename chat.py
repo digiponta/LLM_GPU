@@ -513,10 +513,33 @@ def recover_forgotten_pairs_from_queue(
 
     for question in queued_questions:
         qn = normalize_pair_text(question).lower()
+        queued_intent, queued_slots = classify_intent_and_slots(question)
+        queued_focus = (
+            _clean_slot(queued_slots[0]).lower()
+            if queued_intent == "definition" and queued_slots
+            else None
+        )
+
         best: tuple[str, str] | None = None
         best_rank = -1.0
 
         for user, answer in trusted_pairs:
+            trusted_intent, trusted_slots = classify_intent_and_slots(user)
+            trusted_focus = (
+                _clean_slot(trusted_slots[0]).lower()
+                if trusted_intent == "definition" and trusted_slots
+                else None
+            )
+
+            # Definition recovery must preserve the exact requested concept.
+            # "AIとは" must never be used to repair "LLMとは" merely because
+            # both short strings share the Japanese suffix "とは".
+            if queued_intent == "definition":
+                if trusted_intent != "definition":
+                    continue
+                if queued_focus != trusted_focus:
+                    continue
+
             un = normalize_pair_text(user).lower()
             similarity = response_similarity(qn, un)
             if qn == un:
@@ -524,14 +547,18 @@ def recover_forgotten_pairs_from_queue(
             if similarity < 0.80:
                 continue
 
-            teaching_ok, _ = validate_teaching_answer(user, answer)
-            if not teaching_ok:
+            # Validate both against the historical question and, crucially,
+            # against the current queued question.
+            historical_ok, _ = validate_teaching_answer(user, answer)
+            queued_ok, _ = validate_teaching_answer(question, answer)
+            if not historical_ok or not queued_ok:
                 rejected_old_teachers += 1
                 continue
 
-            # Prefer the closest question match. For equal question similarity,
-            # prefer the more informative answer rather than a short synonym.
-            informativeness = min(len(normalize_pair_text(answer)) / 200.0, 0.20)
+            informativeness = min(
+                len(normalize_pair_text(answer)) / 200.0,
+                0.20,
+            )
             rank = similarity + informativeness
             if rank > best_rank:
                 best_rank = rank
@@ -1846,7 +1873,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.6.21 Rejected-Candidate Diagnostics")
+    print(" LLM_GPU Chat - v1.6.22 Concept-Safe Recovery")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
