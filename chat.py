@@ -458,7 +458,9 @@ def trusted_pairs_from_log(path: Path) -> list[tuple[str, str]]:
             row = json.loads(raw)
         except json.JSONDecodeError:
             continue
-        if str(row.get("source", "")) not in ("chat-manual", "chat-approved"):
+        if str(row.get("source", "")) not in (
+            "chat-manual", "chat-approved", "chat-recovery"
+        ):
             continue
         user = str(row.get("user", "")).strip()
         answer = str(row.get("assistant", "")).strip()
@@ -544,6 +546,12 @@ def recover_forgotten_pairs_from_queue(
             best[0],
             best[1],
         ):
+            append_learning_pair(
+                learning_log,
+                best[0],
+                best[1],
+                source="chat-recovery",
+            )
             reactivated += 1
 
     return matched, reactivated, rejected_old_teachers
@@ -1838,7 +1846,7 @@ def print_info(
 ) -> None:
     print()
     print("==============================================")
-    print(" LLM_GPU Chat - v1.6.18 Subject-Aware Input + Recovery")
+    print(" LLM_GPU Chat - v1.6.19 Strong Forgetting Recovery")
     print("==============================================")
     print("Device          :", device)
     if device.type == "cuda":
