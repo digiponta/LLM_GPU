@@ -21,7 +21,10 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 from pathlib import Path
+import json
 import re
+import subprocess
+import sys
 import time
 from typing import List, Tuple
 
@@ -36,6 +39,9 @@ from tokenizer_bpe import Tokenizer
 DEFAULT_TOKENIZER = "model/tokenizer-v0.7-bpe.json"
 DEFAULT_MODEL = "model/model-gpu-v0.8-chat-clean.pt"
 DEFAULT_CONCEPT_CALIBRATION = "model/concept-calibration-v1512.pt"
+DEFAULT_LEARNING_LOG = "data/chat_history.jsonl"
+DEFAULT_ONLINE_MODEL = "model/model-gpu-v1.6.0-online.pt"
+DEFAULT_ONLINE_TRAINER = "online_train.py"
 
 USER_PREFIX = "人: "
 AI_PREFIX = "AI: "
@@ -69,6 +75,27 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--temperature", type=float, default=0.45)
     parser.add_argument("--top-k", type=int, default=20)
     parser.add_argument("--repetition-penalty", type=float, default=1.05)
+    parser.add_argument(
+        "--learning-log",
+        default=DEFAULT_LEARNING_LOG,
+        help="JSONL file used to accumulate chat learning pairs.",
+    )
+    parser.add_argument(
+        "--learn",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Start with accepted-turn learning capture enabled.",
+    )
+    parser.add_argument(
+        "--online-trainer",
+        default=DEFAULT_ONLINE_TRAINER,
+        help="Training script invoked by /train.",
+    )
+    parser.add_argument(
+        "--online-output",
+        default=DEFAULT_ONLINE_MODEL,
+        help="Checkpoint written by /train.",
+    )
     parser.add_argument(
         "--history-turns",
         type=int,
@@ -135,6 +162,69 @@ def parse_args() -> argparse.Namespace:
         help="Show confidence/agreement diagnostics.",
     )
     return parser.parse_args()
+
+
+def append_learning_pair(
+    path: Path,
+    user_text: str,
+    assistant_text: str,
+    source: str = "chat-auto",
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    row = {
+        "user": user_text,
+        "assistant": assistant_text,
+        "source": source,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    }
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def learning_log_count(path: Path) -> int:
+    if not path.exists():
+        return 0
+    count = 0
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                count += 1
+    return count
+
+
+def run_online_training(
+    args: argparse.Namespace,
+    model_path: Path,
+) -> Path | None:
+    trainer = Path(args.online_trainer)
+    learning_log = Path(args.learning_log)
+    output = Path(args.online_output)
+
+    if not trainer.exists():
+        print(f"[online trainer not found: {trainer}]")
+        return None
+    if learning_log_count(learning_log) < 2:
+        print("[need at least 2 learning pairs before /train]")
+        return None
+
+    cmd = [
+        sys.executable,
+        str(trainer),
+        "--chat-data", str(learning_log),
+        "--base-model", str(model_path),
+        "--tokenizer", str(args.tokenizer),
+        "--output", str(output),
+    ]
+    print("[starting incremental training]")
+    print(" ".join(cmd))
+    completed = subprocess.run(cmd, check=False)
+    if completed.returncode != 0:
+        print(f"[training failed: exit={completed.returncode}]")
+        return None
+    if not output.exists():
+        print(f"[training finished but checkpoint not found: {output}]")
+        return None
+    return output
 
 
 def _slot_overlap(a: list[str], b: list[str]) -> bool:
@@ -1021,12 +1111,20 @@ def main() -> None:
     )
 
     print("Commands:")
-    print("  /reset  clear conversation history")
-    print("  /info   show model/checkpoint information")
-    print("  /exit   quit")
+    print("  /reset        clear conversation history")
+    print("  /info         show model/checkpoint information")
+    print("  /learn on     capture accepted turns for later training")
+    print("  /learn off    stop capture")
+    print("  /learn status show capture state and saved-pair count")
+    print("  /teach TEXT   save a corrected answer for the previous user turn")
+    print("  /train        run low-LR incremental training and reload checkpoint")
+    print("  /exit         quit")
     print()
 
     history: List[Tuple[str, str]] = []
+    learning_log = Path(args.learning_log)
+    learning_enabled = bool(args.learn)
+    last_user_text: str | None = None
 
     while True:
         try:
@@ -1059,7 +1157,67 @@ def main() -> None:
                 tokenizer_path=tokenizer_path,
                 args=args,
             )
+            print("Learning capture :", learning_enabled)
+            print("Learning log     :", learning_log)
+            print("Saved pairs      :", learning_log_count(learning_log))
+            print()
             continue
+
+        if command == "/learn on":
+            learning_enabled = True
+            print("[learning capture enabled]")
+            print()
+            continue
+
+        if command == "/learn off":
+            learning_enabled = False
+            print("[learning capture disabled]")
+            print()
+            continue
+
+        if command == "/learn status":
+            print(
+                f"[learning={'ON' if learning_enabled else 'OFF'}, "
+                f"pairs={learning_log_count(learning_log)}, "
+                f"log={learning_log}]"
+            )
+            print()
+            continue
+
+        if command.startswith("/teach "):
+            corrected = user_text[len("/teach "):].strip()
+            if not corrected:
+                print("[usage: /teach corrected answer]")
+            elif last_user_text is None:
+                print("[no previous user turn to teach]")
+            else:
+                append_learning_pair(
+                    learning_log,
+                    last_user_text,
+                    corrected,
+                    source="chat-manual",
+                )
+                print(
+                    f"[manual learning pair saved; "
+                    f"pairs={learning_log_count(learning_log)}]"
+                )
+            print()
+            continue
+
+        if command == "/train":
+            new_model_path = run_online_training(args, model_path)
+            if new_model_path is not None:
+                model, checkpoint = LanguageModel.load_checkpoint(
+                    str(new_model_path),
+                    device=device,
+                )
+                model_path = new_model_path
+                print(f"[reloaded trained checkpoint: {model_path}]")
+                load_concept_calibration(calibration_path, device)
+            print()
+            continue
+
+        last_user_text = user_text
 
         prompt, selected_history = build_prompt(
             history=history,
@@ -1205,6 +1363,17 @@ def main() -> None:
         # UNKNOWN/rejected turns are intentionally discarded.
         if accepted:
             history.append((user_text, reply))
+            if learning_enabled:
+                append_learning_pair(
+                    learning_log,
+                    user_text,
+                    reply,
+                    source="chat-auto",
+                )
+                print(
+                    f"[learning pair saved; "
+                    f"pairs={learning_log_count(learning_log)}]"
+                )
 
 
 if __name__ == "__main__":
